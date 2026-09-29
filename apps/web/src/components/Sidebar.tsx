@@ -5,11 +5,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
 import {
+  closestCenter,
   DndContext,
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragOverEvent,
   type DragStartEvent,
   type Modifier,
 } from "@dnd-kit/core";
@@ -184,8 +184,9 @@ import {
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
-  resolveSidebarDropTarget,
   resolveSidebarHoldDrop,
+  sidebarHoldDropSection,
+  sidebarHoldDropTarget,
   type SidebarHoldDrop,
   resolveSidebarDropVerb,
   resolveSidebarRowAccessibility,
@@ -198,7 +199,6 @@ import {
   resolveWorkingStartedAt,
   nestSubThreads,
   sidebarListItemId,
-  sidebarMarkerId,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
   sortThreadsForSidebar,
@@ -209,11 +209,7 @@ import {
   type SidebarSection,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
-import {
-  createSidebarCollisionDetection,
-  createSidebarSortingStrategy,
-  restrictBelowSidebarLabel,
-} from "./Sidebar.drag";
+import { restrictBelowSidebarLabel } from "./Sidebar.drag";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import {
@@ -553,11 +549,8 @@ function SortableThreadRow(props: {
 const draftSurfaceClassName = "bg-warning/4 hover:bg-warning/8";
 const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
 
-// Structural list items — the section headers and the
-// empty-section placeholders — take part in the sortable list so they shift
-// with the rows and the gap can open on either side of them. They can't be
-// picked up, and a marker is the sortable `over` when the pointer is on it,
-// which resolveSidebarDropTarget turns into the section the gap sits in.
+// Structural list items (section headers, group headers, empty-section
+// placeholders) sit in the sortable list beside the rows but can't be picked up.
 function SortableSidebarMarker(props: {
   item: Exclude<SidebarListItem, { kind: "thread" }>;
   className?: string;
@@ -689,17 +682,13 @@ function SidebarSectionPlaceholder(props: {
   );
 }
 
-// Zero-height markers reserve no label space at rest. During a drag the
-// sorting strategy opens 24px for a 16px label with 4px clearance on each side.
-const SIDEBAR_DRAG_LABEL_HEIGHT = 24;
-// Inside Active, rows hold still so the pointer can land on the row it means.
+// Rows hold still while dragging so the pointer can land on the row it means.
 const holdRowsSortingStrategy: SortingStrategy = () => null;
 
 function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
-  label: string;
-  visible: boolean;
-  isDropTarget: boolean;
+  // While dragging, the top boundary shows the strip that pins a thread first.
+  pinStrip: { readonly isDropTarget: boolean } | null;
 }) {
   return (
     <SortableSidebarMarker
@@ -707,23 +696,21 @@ function SidebarDragBoundary(props: {
       data-testid={`sidebar-${props.marker}`}
       className="pointer-events-none relative mx-0.5 -mb-px h-0"
     >
-      {props.visible ? (
-        <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
-          <span
+      {props.pinStrip ? (
+        // Overlays the top of the list so showing it moves no rows mid-drag.
+        <div
+          data-drop-zone="pin"
+          className="pointer-events-auto absolute inset-x-0 top-0 z-30 h-9 rounded-md bg-sidebar"
+        >
+          <div
             className={cn(
-              "shrink-0 text-xs font-medium",
-              props.isDropTarget ? "text-primary" : "text-sidebar-foreground/80",
+              "flex h-full items-center justify-center gap-1.5 rounded-md border border-dashed border-sidebar-foreground/25 text-xs text-sidebar-foreground/80",
+              props.pinStrip.isDropTarget && "border-primary bg-primary/10 text-primary",
             )}
           >
-            {props.label}
-          </span>
-          <span
-            aria-hidden
-            className={cn(
-              "h-px flex-1",
-              props.isDropTarget ? "bg-primary/50" : "bg-sidebar-foreground/25",
-            )}
-          />
+            <PinIcon aria-hidden className="size-3.5" />
+            Drop to pin
+          </div>
         </div>
       ) : null}
     </SortableSidebarMarker>
@@ -3433,10 +3420,7 @@ export default function Sidebar() {
     readonly activeKey: string;
     readonly activeSection: SidebarSection;
     readonly occurredAt: string;
-    readonly activationY: number | null;
-    readonly targetSection: SidebarSection | null;
   } | null>(null);
-  const dragTargetSection = dragState?.targetSection ?? null;
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   // Inside Active the rows hold still and the pointer picks the drop directly
   // (file under a row, or land beside it). Null elsewhere, where the animated
@@ -3613,20 +3597,15 @@ export default function Sidebar() {
       const list = threadListRef.current;
       const header = list?.querySelector<HTMLElement>('[data-testid="sidebar-pinned-header"]');
       if (list && header) {
-        const listRect = list.getBoundingClientRect();
-        const scale = list.offsetWidth > 0 ? listRect.width / list.offsetWidth : 1;
         dragLabelOffsetRef.current =
-          header.getBoundingClientRect().top - listRect.top + SIDEBAR_DRAG_LABEL_HEIGHT * scale;
+          header.getBoundingClientRect().top - list.getBoundingClientRect().top;
       } else {
         dragLabelOffsetRef.current = 0;
       }
       setDragState({
         activeKey,
         activeSection,
-        targetSection: activeSection,
         occurredAt: new Date().toISOString(),
-        activationY:
-          event.activatorEvent instanceof PointerEvent ? event.activatorEvent.clientY : null,
       });
     },
     [sectionByThreadKey],
@@ -3723,50 +3702,7 @@ export default function Sidebar() {
     sidebarListOrderKey,
     visibleDraftSessionCount,
   ]);
-  const handleThreadDragOver = useCallback(
-    (event: DragOverEvent) => {
-      const target = event.over
-        ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
-        : null;
-      setDragState((current) =>
-        current === null || current.activeKey !== String(event.active.id)
-          ? current
-          : { ...current, targetSection: target?.section ?? null },
-      );
-    },
-    [sidebarListItems],
-  );
   const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
-  const draggedSettledOrder = useMemo(() => {
-    const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
-    if (dragState === null || thread === undefined) return [];
-    const key = (candidate: EnvironmentThreadShell) =>
-      scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id));
-    return sortSettledThreads([
-      ...settledThreads.filter((candidate) => key(candidate) !== dragState.activeKey),
-      applySidebarThreadDrop(thread, "settled", dragState.occurredAt),
-    ]).map(key);
-  }, [dragState, settledThreads, threadByKey]);
-  const sidebarSortingStrategy = useMemo(
-    () =>
-      createSidebarSortingStrategy({
-        items: sidebarListItems,
-        boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
-        settledOrder: draggedSettledOrder,
-        settledExpanded: settledShelfExpanded,
-        settledVisibleCount,
-        routeThreadKey,
-        snoozedThreadCount: snoozedThreads.length,
-      }),
-    [
-      draggedSettledOrder,
-      routeThreadKey,
-      settledShelfExpanded,
-      settledVisibleCount,
-      sidebarListItems,
-      snoozedThreads.length,
-    ],
-  );
   // Hidden and filtered threads keep their keys. Reserve those slots without
   // including the rows in the visible drop order or writing to them.
   const { pinnedKeysById, activeKeysById } = useMemo(
@@ -3786,56 +3722,48 @@ export default function Sidebar() {
     }),
     [threads],
   );
-  const draggedThreadKey = dragState?.activeKey;
-  const draggedFromSection = dragState?.activeSection;
-  const dragActivationY = dragState?.activationY;
-  const dndCollisionDetection = useMemo(() => {
-    if (draggedThreadKey === undefined || draggedFromSection === undefined)
-      return createSidebarCollisionDetection(() => true);
-    const source = threadByKey.get(draggedThreadKey);
-    if (source === undefined) return createSidebarCollisionDetection(() => false);
-    return createSidebarCollisionDetection(
-      (id) => {
-        const target = resolveSidebarDropTarget(sidebarListItems, draggedThreadKey, id);
-        if (target === null) return false;
-        return (
-          planSidebarThreadDrop({
-            activeKey: draggedThreadKey,
-            activeSection: draggedFromSection,
-            activePinned: source.pinnedAt != null,
-            activeSettled: source.settledOverride === "settled",
-            supportsSettlement:
-              serverConfigs.get(source.environmentId)?.environment.capabilities.threadSettlement ===
-              true,
-            target,
-            pinnedOrder: pinnedKeys,
-            pinnedKeysById,
-            reorderableKeys: draggableThreadKeys,
-            activeOrder: activeKeys,
-            activeKeysById,
-            activeReorderableKeys: activeReorderableThreadKeys,
-          }).kind !== "none"
-        );
-      },
-      {
-        items: sidebarListItems,
-        activationY: dragActivationY ?? null,
-      },
-    );
+  // The hovered drop, kept only when it would change something: a target the
+  // server cannot take (or dropping back in place) shows no indicator.
+  const shownHoldDrop = useMemo((): SidebarHoldDrop | null => {
+    if (holdDrop === null || dragState === null) return null;
+    if (holdDrop.kind === "none" || holdDrop.kind === "nest") return holdDrop;
+    const source = threadByKey.get(dragState.activeKey);
+    const target = sidebarHoldDropTarget({
+      drop: holdDrop,
+      activeKey: dragState.activeKey,
+      pinnedOrder: pinnedKeys,
+      activeOrder: activeKeys,
+    });
+    if (source === undefined || target === null) return { kind: "none" };
+    const plan = planSidebarThreadDrop({
+      activeKey: dragState.activeKey,
+      activeSection: dragState.activeSection,
+      activePinned: source.pinnedAt != null,
+      activeSettled: source.settledOverride === "settled",
+      supportsSettlement:
+        serverConfigs.get(source.environmentId)?.environment.capabilities.threadSettlement === true,
+      target,
+      pinnedOrder: pinnedKeys,
+      pinnedKeysById,
+      reorderableKeys: draggableThreadKeys,
+      activeOrder: activeKeys,
+      activeKeysById,
+      activeReorderableKeys: activeReorderableThreadKeys,
+    });
+    return plan.kind === "none" ? { kind: "none" } : holdDrop;
   }, [
+    activeKeys,
     activeKeysById,
+    activeReorderableThreadKeys,
+    dragState,
+    draggableThreadKeys,
+    holdDrop,
+    pinnedKeys,
     pinnedKeysById,
     serverConfigs,
-    activeKeys,
-    activeReorderableThreadKeys,
-    draggedThreadKey,
-    draggedFromSection,
-    dragActivationY,
-    draggableThreadKeys,
-    pinnedKeys,
-    sidebarListItems,
     threadByKey,
   ]);
+  const dragTargetSection = shownHoldDrop === null ? null : sidebarHoldDropSection(shownHoldDrop);
   // Threads that already have sub-threads cannot be filed themselves.
   const parentThreadKeys = useMemo(
     () =>
@@ -3886,68 +3814,84 @@ export default function Sidebar() {
     const lookups = holdLookupsRef.current;
     const dragged =
       draggedKeyForHold === null ? undefined : lookups.threadByKey.get(draggedKeyForHold);
-    const list = threadListRef.current;
-    if (draggedKeyForHold === null || dragged === undefined || list === null) {
+    if (draggedKeyForHold === null || dragged === undefined) {
       setHoldDrop(null);
       return;
     }
+    const draggedSection = lookups.sectionByThreadKey.get(draggedKeyForHold);
+    // Only an Active thread files under another; elsewhere it would stay
+    // in its own section, away from the parent.
     const draggedCanFile =
+      draggedSection === "active" &&
       !lookups.parentThreadKeys.has(draggedKeyForHold) &&
       lookups.serverConfigs.get(dragged.environmentId)?.environment.capabilities.threadParenting ===
         true;
     const none: SidebarHoldDrop = { kind: "none" };
-    const update = (next: SidebarHoldDrop | null) =>
+    const update = (next: SidebarHoldDrop) =>
       setHoldDrop((current) =>
-        current === next ||
-        (current !== null &&
-          next !== null &&
-          current.kind === next.kind &&
-          (current.kind === "none" || (next.kind !== "none" && current.key === next.key)))
+        current !== null &&
+        current.kind === next.kind &&
+        (!("key" in current) || !("key" in next) || current.key === next.key)
           ? current
           : next,
       );
-    // A drag that starts in Active holds the rows from the first frame.
-    update(lookups.sectionByThreadKey.get(draggedKeyForHold) === "active" ? none : null);
+    update(none);
     const onPointerMove = (event: PointerEvent) => {
       const {
         displayGroupByThreadKey: groups,
         sectionByThreadKey: sections,
         threadByKey: byKey,
       } = holdLookupsRef.current;
-      // The Active band: from its first group header to its last row. Above or
-      // below it the animated preview takes over for pinning and settling.
-      const rows = [...list.querySelectorAll<HTMLElement>("[data-thread-key]")].filter((row) => {
-        const key = row.dataset.threadKey!;
-        return key !== draggedKeyForHold && sections.get(key) === "active";
-      });
-      const bandElements = [
-        ...list.querySelectorAll<HTMLElement>('[data-testid="sidebar-worktree-group"]'),
-        ...rows,
-      ].map((element) => element.getBoundingClientRect());
-      if (bandElements.length === 0) return update(null);
-      const bandTop = Math.min(...bandElements.map((rect) => rect.top));
-      const bandBottom = Math.max(...bandElements.map((rect) => rect.bottom));
-      if (event.clientY < bandTop || event.clientY > bandBottom) return update(null);
-      for (const row of rows) {
-        const rect = row.getBoundingClientRect();
-        if (event.clientY < rect.top || event.clientY >= rect.bottom) continue;
-        const targetKey = row.dataset.threadKey!;
-        const target = byKey.get(targetKey);
-        if (target === undefined) break;
-        return update(
-          resolveSidebarHoldDrop({
-            targetKey,
-            offset: (event.clientY - rect.top) / rect.height,
-            canNest:
-              draggedCanFile &&
-              target.environmentId === dragged.environmentId &&
-              !target.parentThreadId,
-            canReorder: groups.get(targetKey) === groups.get(draggedKeyForHold),
-          }),
-        );
+      const hit = document.elementsFromPoint(event.clientX, event.clientY);
+      if (hit.some((element) => element.closest('[data-drop-zone="pin"]'))) {
+        return update({ kind: "pin" });
       }
-      // Over a group header or the dragged row's empty slot.
-      update(none);
+      if (
+        hit.some((element) =>
+          element.closest(
+            '[data-testid="sidebar-settled-header"], [data-testid="sidebar-settled-placeholder"]',
+          ),
+        )
+      ) {
+        return update({ kind: "settle" });
+      }
+      const row = hit
+        .map((element) => element.closest<HTMLElement>("[data-thread-key]"))
+        .find((element) => element && element.dataset.threadKey !== draggedKeyForHold);
+      const targetKey = row?.dataset.threadKey;
+      const target = targetKey === undefined ? undefined : byKey.get(targetKey);
+      // Over a group header, a gap, or the dragged row's empty slot.
+      if (row == null || targetKey === undefined || target === undefined) return update(none);
+      const rect = row.getBoundingClientRect();
+      const offset = (event.clientY - rect.top) / rect.height;
+      switch (sections.get(targetKey)) {
+        case "settled":
+          return update({ kind: "settle" });
+        case "pinned":
+          return update({
+            kind: offset < 0.5 ? "before" : "after",
+            key: targetKey,
+            section: "pinned",
+          });
+        case "active":
+          return update(
+            resolveSidebarHoldDrop({
+              targetKey,
+              offset,
+              canNest:
+                draggedCanFile &&
+                target.environmentId === dragged.environmentId &&
+                !target.parentThreadId,
+              // A thread joining Active lands in its own branch group, so a
+              // line is honest only beside rows of that group.
+              canReorder:
+                draggedSection !== "active" ||
+                groups.get(targetKey) === groups.get(draggedKeyForHold),
+            }),
+          );
+        default:
+          return update(none);
+      }
     };
     window.addEventListener("pointermove", onPointerMove);
     return () => window.removeEventListener("pointermove", onPointerMove);
@@ -3969,22 +3913,15 @@ export default function Sidebar() {
       // is no previewed position to land in.
       if (hold?.kind === "none") return;
       const activeSection = sectionByThreadKey.get(activeKey);
-      const target = (() => {
-        if (hold !== null) {
-          const activeOrder = activeKeys.filter((key) => key !== activeKey);
-          const index = activeOrder.indexOf(hold.key);
-          if (index === -1) return null;
-          activeOrder.splice(hold.kind === "before" ? index : index + 1, 0, activeKey);
-          return {
-            section: "active" as const,
-            pinnedOrder: pinnedKeys.filter((key) => key !== activeKey),
-            activeOrder,
-          };
-        }
-        return event.over === null
+      const target =
+        hold === null
           ? null
-          : resolveSidebarDropTarget(sidebarListItems, activeKey, String(event.over.id));
-      })();
+          : sidebarHoldDropTarget({
+              drop: hold,
+              activeKey,
+              pinnedOrder: pinnedKeys,
+              activeOrder: activeKeys,
+            });
       const activeThread = threadByKey.get(activeKey);
       if (activeSection === undefined || target === null || activeThread === undefined) return;
       const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
@@ -5162,21 +5099,17 @@ export default function Sidebar() {
             >
               <DndContext
                 sensors={dndSensors}
-                collisionDetection={dndCollisionDetection}
+                collisionDetection={closestCenter}
                 modifiers={[
                   restrictToVerticalAxis,
                   restrictBelowPins,
                   restrictToFirstScrollableAncestor,
                 ]}
                 onDragStart={handleThreadDragStart}
-                onDragOver={handleThreadDragOver}
                 onDragEnd={handleThreadDragEnd}
               >
                 <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
-                <SortableContext
-                  items={sortableIds}
-                  strategy={holdDrop !== null ? holdRowsSortingStrategy : sidebarSortingStrategy}
-                >
+                <SortableContext items={sortableIds} strategy={holdRowsSortingStrategy}>
                   <ul
                     ref={attachListMotionRef}
                     // VoiceOver treats an exposed list as an interaction boundary,
@@ -5236,11 +5169,11 @@ export default function Sidebar() {
                             dropVerb={
                               dragState?.activeKey !== threadKey
                                 ? null
-                                : holdDrop?.kind === "nest"
+                                : shownHoldDrop?.kind === "nest"
                                   ? "nest"
                                   : resolveSidebarDropVerb(
                                       dragState.activeSection,
-                                      holdDrop !== null ? "active" : dragTargetSection,
+                                      dragTargetSection,
                                     )
                             }
                             dragOverPinned={
@@ -5281,11 +5214,14 @@ export default function Sidebar() {
                             }
                             showProject={section !== "active"}
                             isSubThread={section === "active" && subThreadKeys.has(threadKey)}
-                            isNestTarget={holdDrop?.kind === "nest" && holdDrop.key === threadKey}
+                            isNestTarget={
+                              shownHoldDrop?.kind === "nest" && shownHoldDrop.key === threadKey
+                            }
                             dropLine={
-                              (holdDrop?.kind === "before" || holdDrop?.kind === "after") &&
-                              holdDrop.key === threadKey
-                                ? holdDrop.kind
+                              (shownHoldDrop?.kind === "before" ||
+                                shownHoldDrop?.kind === "after") &&
+                              shownHoldDrop.key === threadKey
+                                ? shownHoldDrop.kind
                                 : null
                             }
                             providerEntryByInstanceId={
@@ -5382,9 +5318,11 @@ export default function Sidebar() {
                               <SidebarDragBoundary
                                 key="pinned-header"
                                 marker="pinned-header"
-                                label="Pinned"
-                                visible={from !== null && holdDrop === null}
-                                isDropTarget={dragTargetSection === "pinned"}
+                                pinStrip={
+                                  from === null
+                                    ? null
+                                    : { isDropTarget: shownHoldDrop?.kind === "pin" }
+                                }
                               />,
                             );
                             break;
@@ -5393,9 +5331,7 @@ export default function Sidebar() {
                               <SidebarDragBoundary
                                 key="pinned-divider"
                                 marker="pinned-divider"
-                                label="Active"
-                                visible={from !== null && holdDrop === null}
-                                isDropTarget={dragTargetSection === "active"}
+                                pinStrip={null}
                               />,
                             );
                             break;

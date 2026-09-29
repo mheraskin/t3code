@@ -121,11 +121,11 @@ export function useRetainedValue<T>(key: string | null, value: T | null): T | nu
 export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
   args.isSorting ? defaultAnimateLayoutChanges(args) : false;
 
-// Rows and section markers share one sortable list. The separators resolve
-// the lifecycle action; Sidebar.drag previews the resulting layout. Pinned
-// and active threads keep the dragged position; settled threads use time
-// order. Snoozed rows can leave the shelf, but dropping into it is not
-// supported because snoozing requires a wake time.
+// Rows and section markers share one sortable list. While dragging, the rows
+// hold still and the pointer picks the drop (see SidebarHoldDrop). Pinned and
+// active threads keep the dropped position; settled threads use time order.
+// Snoozed rows can leave the shelf, but dropping into it is not supported
+// because snoozing requires a wake time.
 
 export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
 
@@ -152,7 +152,7 @@ export type SidebarListItem =
   | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
   | { readonly kind: "marker"; readonly marker: SidebarListMarker }
   /** The worktree header above a run of active threads sharing a checkout.
-      Headers never take part in drops; the drag preview hides them. */
+      Headers never take part in drops. */
   | { readonly kind: "group"; readonly key: string };
 
 export function sidebarListItemId(item: SidebarListItem): string {
@@ -161,55 +161,12 @@ export function sidebarListItemId(item: SidebarListItem): string {
   return sidebarMarkerId(item.marker);
 }
 
-/** The section a slot belongs to, read off the markers around it: from
-    the top down, everything before the pinned divider is pinned, then the
-    inbox until the snoozed header, the shelf until the settled header,
-    then settled. */
-function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number): SidebarSection {
-  let section: SidebarSection = "pinned";
-  for (let i = 0; i < index && i < items.length; i += 1) {
-    const item = items[i]!;
-    if (item.kind !== "marker") continue;
-    if (item.marker === "pinned-divider") section = "active";
-    else if (item.marker === "snoozed-header") section = "snoozed";
-    else if (item.marker === "settled-header") section = "settled";
-  }
-  return section;
-}
-
-/** Resolve the destination section and manual order from an arrayMove across
- * the separators. The snoozed shelf is never a destination. */
+/** The destination section and manual orders a drop asks for. */
 export type SidebarDropTarget = {
   readonly section: "pinned" | "active" | "settled";
   readonly pinnedOrder: readonly string[];
   readonly activeOrder: readonly string[];
 };
-
-export function resolveSidebarDropTarget(
-  items: readonly SidebarListItem[],
-  activeKey: string,
-  overId: string,
-): SidebarDropTarget | null {
-  const activeIndex = items.findIndex((item) => sidebarListItemId(item) === activeKey);
-  const overIndex = items.findIndex((item) => sidebarListItemId(item) === overId);
-  if (activeIndex === -1 || overIndex === -1 || items[activeIndex]?.kind !== "thread") return null;
-  const moved = items.filter((_, index) => index !== activeIndex);
-  moved.splice(overIndex, 0, items[activeIndex]!);
-  const section = sectionAtSidebarSlot(moved, overIndex);
-  if (section === "snoozed") return null;
-  const pinnedOrder: string[] = [];
-  const activeOrder: string[] = [];
-  let currentSection: SidebarSection = "pinned";
-  for (const item of moved) {
-    if (item.kind === "marker") {
-      if (item.marker === "pinned-divider") currentSection = "active";
-      else if (item.marker === "snoozed-header" || item.marker === "settled-header") break;
-    } else if (item.kind === "thread") {
-      (currentSection === "pinned" ? pinnedOrder : activeOrder).push(item.key);
-    }
-  }
-  return { section, pinnedOrder, activeOrder };
-}
 
 /** Files sub-threads directly beneath their parent, wherever the parent's
     group sits. A thread whose parent is not in the list (settled, pinned,
@@ -255,13 +212,37 @@ export function nestSubThreads<
   return { groups: nested, subThreadKeys };
 }
 
-/** Where a drag inside Active lands. The rows hold still, so the pointer
-    picks a row directly: its middle files the dragged thread under it, its
-    edges place the thread before or after it. "none" drops nothing. */
+/** Where a drag lands. The rows hold still, so the pointer picks the drop
+    directly: the middle of an Active row files the dragged thread under it,
+    row edges place it before or after, the pin strip at the top pins it
+    first, and the Settled shelf settles it. "none" drops nothing. */
 export type SidebarHoldDrop =
   | { readonly kind: "none" }
-  | { readonly kind: "nest" | "before" | "after"; readonly key: string };
+  | { readonly kind: "pin" }
+  | { readonly kind: "settle" }
+  | { readonly kind: "nest"; readonly key: string }
+  | {
+      readonly kind: "before" | "after";
+      readonly key: string;
+      readonly section: "pinned" | "active";
+    };
 
+export function sidebarHoldDropSection(drop: SidebarHoldDrop): SidebarSection | null {
+  switch (drop.kind) {
+    case "none":
+      return null;
+    case "pin":
+      return "pinned";
+    case "settle":
+      return "settled";
+    case "nest":
+      return "active";
+    default:
+      return drop.section;
+  }
+}
+
+/** The drop over one Active row. */
 export function resolveSidebarHoldDrop(input: {
   readonly targetKey: string;
   /** Pointer position within the row, 0 at its top edge and 1 at its bottom. */
@@ -273,9 +254,43 @@ export function resolveSidebarHoldDrop(input: {
 }): SidebarHoldDrop {
   const { targetKey, offset, canNest, canReorder } = input;
   const edge = offset < 0.5 ? "before" : "after";
-  if (!canNest) return canReorder ? { kind: edge, key: targetKey } : { kind: "none" };
+  if (!canNest) {
+    return canReorder ? { kind: edge, key: targetKey, section: "active" } : { kind: "none" };
+  }
   const nearEdge = offset < 0.25 || offset > 0.75;
-  return canReorder && nearEdge ? { kind: edge, key: targetKey } : { kind: "nest", key: targetKey };
+  return canReorder && nearEdge
+    ? { kind: edge, key: targetKey, section: "active" }
+    : { kind: "nest", key: targetKey };
+}
+
+/** The section move a held drop asks for, in the shape planSidebarThreadDrop
+    takes. Null for drops that are not section moves (nothing, or filing). */
+export function sidebarHoldDropTarget(input: {
+  readonly drop: SidebarHoldDrop;
+  readonly activeKey: string;
+  /** Displayed orders before the drop. */
+  readonly pinnedOrder: readonly string[];
+  readonly activeOrder: readonly string[];
+}): SidebarDropTarget | null {
+  const { drop, activeKey } = input;
+  const pinnedOrder = input.pinnedOrder.filter((key) => key !== activeKey);
+  const activeOrder = input.activeOrder.filter((key) => key !== activeKey);
+  switch (drop.kind) {
+    case "none":
+    case "nest":
+      return null;
+    case "pin":
+      return { section: "pinned", pinnedOrder: [activeKey, ...pinnedOrder], activeOrder };
+    case "settle":
+      return { section: "settled", pinnedOrder, activeOrder };
+    default: {
+      const order = drop.section === "pinned" ? pinnedOrder : activeOrder;
+      const index = order.indexOf(drop.key);
+      if (index === -1) return null;
+      order.splice(drop.kind === "before" ? index : index + 1, 0, activeKey);
+      return { section: drop.section, pinnedOrder, activeOrder };
+    }
+  }
 }
 
 export type SidebarThreadDropPlan =

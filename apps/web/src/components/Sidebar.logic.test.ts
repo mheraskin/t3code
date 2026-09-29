@@ -34,12 +34,10 @@ import {
   sortLogicalProjectsForSidebar,
   nestSubThreads,
   resolveSidebarHoldDrop,
-  resolveSidebarDropTarget,
+  sidebarHoldDropTarget,
   pinOrderKeyBetween,
   planPinnedReorder,
   planSidebarThreadDrop,
-  sidebarMarkerId,
-  sidebarListItemId,
   sortPinnedThreadsForSidebar,
   sortThreadsForSidebar,
   sortProjectsForSidebar,
@@ -47,9 +45,6 @@ import {
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
-  type SidebarListItem,
-  type SidebarListMarker,
-  type SidebarSection,
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
@@ -1107,179 +1102,6 @@ describe("planPinnedReorder", () => {
     const keys = assignments.map((entry) => entry.orderKey);
     expect([...keys].sort()).toEqual(keys);
     expect(new Set(keys).size).toBe(keys.length);
-  });
-});
-
-describe("resolveSidebarDropTarget", () => {
-  const thread = (key: string, section: SidebarSection): SidebarListItem => ({
-    kind: "thread",
-    key,
-    section,
-  });
-  const marker = (marker: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker });
-  // Pinned p1 p2 | Active a1 a2 | Snoozed z1 | Settled s1
-  const items: readonly SidebarListItem[] = [
-    marker("pinned-header"),
-    thread("p1", "pinned"),
-    thread("p2", "pinned"),
-    marker("pinned-divider"),
-    thread("a1", "active"),
-    thread("a2", "active"),
-    marker("snoozed-header"),
-    thread("z1", "snoozed"),
-    marker("settled-header"),
-    thread("s1", "settled"),
-  ];
-  const resolve = (activeKey: string, overId: string) =>
-    resolveSidebarDropTarget(items, activeKey, overId);
-
-  it("leaves worktree group headers out of the active order", () => {
-    const list: SidebarListItem[] = [
-      marker("pinned-header"),
-      marker("pinned-divider"),
-      { kind: "group", key: "env:project:branch:main" },
-      thread("a1", "active"),
-      { kind: "group", key: "env:project:worktree:/wt/one" },
-      thread("a2", "active"),
-      marker("settled-header"),
-    ];
-    expect(resolveSidebarDropTarget(list, "a2", "sidebar-group-env:project:branch:main")).toEqual({
-      section: "active",
-      pinnedOrder: [],
-      activeOrder: ["a2", "a1"],
-    });
-  });
-
-  it("keeps marker-like scoped thread keys draggable", () => {
-    const key = "marker:pinned-header";
-    const list: SidebarListItem[] = [
-      marker("pinned-header"),
-      thread(key, "pinned"),
-      thread("env:other", "pinned"),
-      marker("pinned-divider"),
-    ];
-    expect(new Set(list.map(sidebarListItemId)).size).toBe(list.length);
-    expect(resolveSidebarDropTarget(list, key, "env:other")).toEqual({
-      section: "pinned",
-      pinnedOrder: ["env:other", key],
-      activeOrder: [],
-    });
-  });
-
-  it("reads the section off the markers above the gap", () => {
-    expect(resolve("p1", "a2")).toEqual({
-      section: "active",
-      pinnedOrder: ["p2"],
-      activeOrder: ["a1", "a2", "p1"],
-    });
-    expect(resolve("a1", "s1")).toEqual({
-      section: "settled",
-      pinnedOrder: ["p1", "p2"],
-      activeOrder: ["a2"],
-    });
-    expect(resolve("s1", "a1")).toEqual({
-      section: "active",
-      pinnedOrder: ["p1", "p2"],
-      activeOrder: ["s1", "a1", "a2"],
-    });
-  });
-
-  it("uses arrayMove placement, so a marker hovered from below lands above it", () => {
-    // Dragging a1 up onto the divider: the divider shifts down, a1 becomes
-    // the last pinned row.
-    expect(resolve("a1", sidebarMarkerId("pinned-divider"))).toEqual({
-      section: "pinned",
-      pinnedOrder: ["p1", "p2", "a1"],
-      activeOrder: ["a2"],
-    });
-    // Dragging p2 down onto the divider: the divider shifts up, p2 is the
-    // first inbox row — an unpin.
-    expect(resolve("p2", sidebarMarkerId("pinned-divider"))).toEqual({
-      section: "active",
-      pinnedOrder: ["p1"],
-      activeOrder: ["p2", "a1", "a2"],
-    });
-    // Same on the Settled header: from above it settles; from below the
-    // gap lands in whatever is above the header — here the snoozed shelf,
-    // which is never a target.
-    expect(resolve("a2", sidebarMarkerId("settled-header"))?.section).toBe("settled");
-    expect(resolve("s1", sidebarMarkerId("settled-header"))).toBeNull();
-  });
-
-  it("reorders inside the pinned block with the dragged row at the over slot", () => {
-    expect(resolve("p1", "p2")).toEqual({
-      section: "pinned",
-      pinnedOrder: ["p2", "p1"],
-      activeOrder: ["a1", "a2"],
-    });
-    expect(resolve("a2", "p1")).toEqual({
-      section: "pinned",
-      pinnedOrder: ["a2", "p1", "p2"],
-      activeOrder: ["a1"],
-    });
-  });
-
-  it("lands first in Pinned when hovering its permanent header", () => {
-    expect(resolve("a2", sidebarMarkerId("pinned-header"))).toEqual({
-      section: "pinned",
-      pinnedOrder: ["a2", "p1", "p2"],
-      activeOrder: ["a1"],
-    });
-  });
-
-  it("reorders active rows in either direction without changing sections", () => {
-    for (const [from, to] of [
-      ["a1", "a2"],
-      ["a2", "a1"],
-    ] as const) {
-      expect(resolve(from, to)).toEqual({
-        section: "active",
-        pinnedOrder: ["p1", "p2"],
-        activeOrder: ["a2", "a1"],
-      });
-    }
-  });
-
-  it("never lands in the snoozed shelf", () => {
-    expect(resolve("a1", "z1")).toBeNull();
-    expect(resolve("a1", sidebarMarkerId("snoozed-header"))).toBeNull();
-  });
-
-  it("lands on a placeholder when the section is otherwise empty", () => {
-    const withPlaceholder: readonly SidebarListItem[] = [
-      marker("pinned-header"),
-      marker("pinned-divider"),
-      thread("a1", "active"),
-      marker("settled-header"),
-      marker("settled-placeholder"),
-    ];
-    expect(
-      resolveSidebarDropTarget(withPlaceholder, "a1", sidebarMarkerId("settled-placeholder")),
-    ).toEqual({ section: "settled", pinnedOrder: [], activeOrder: [] });
-  });
-
-  it("lands in empty Pinned using its header without an extra placeholder", () => {
-    const emptyPinned: readonly SidebarListItem[] = [
-      marker("pinned-header"),
-      marker("pinned-divider"),
-      thread("a1", "active"),
-    ];
-    expect(resolveSidebarDropTarget(emptyPinned, "a1", sidebarMarkerId("pinned-header"))).toEqual({
-      section: "pinned",
-      pinnedOrder: ["a1"],
-      activeOrder: [],
-    });
-    expect(resolveSidebarDropTarget(emptyPinned, "a1", sidebarMarkerId("pinned-divider"))).toEqual({
-      section: "pinned",
-      pinnedOrder: ["a1"],
-      activeOrder: [],
-    });
-  });
-
-  it("rejects ids that are not in the list", () => {
-    expect(resolve("a1", "nope")).toBeNull();
-    expect(resolve("nope", "a1")).toBeNull();
-    expect(resolve(sidebarMarkerId("pinned-divider"), "a1")).toBeNull();
   });
 });
 
@@ -2613,17 +2435,58 @@ describe("resolveSidebarHoldDrop", () => {
     resolveSidebarHoldDrop({ targetKey: "t", offset, canNest, canReorder });
 
   it("files into the middle of a row and reorders at its edges", () => {
-    expect(drop(0.1, true, true)).toEqual({ kind: "before", key: "t" });
+    expect(drop(0.1, true, true)).toEqual({ kind: "before", key: "t", section: "active" });
     expect(drop(0.5, true, true)).toEqual({ kind: "nest", key: "t" });
-    expect(drop(0.9, true, true)).toEqual({ kind: "after", key: "t" });
+    expect(drop(0.9, true, true)).toEqual({ kind: "after", key: "t", section: "active" });
   });
 
   it("uses the whole row for whichever drop is possible", () => {
     // Another branch group: a reorder would snap back, so the row only files.
     expect(drop(0.1, true, false)).toEqual({ kind: "nest", key: "t" });
     // A sub-thread target: halves reorder.
-    expect(drop(0.4, false, true)).toEqual({ kind: "before", key: "t" });
-    expect(drop(0.6, false, true)).toEqual({ kind: "after", key: "t" });
+    expect(drop(0.4, false, true)).toEqual({ kind: "before", key: "t", section: "active" });
+    expect(drop(0.6, false, true)).toEqual({ kind: "after", key: "t", section: "active" });
     expect(drop(0.5, false, false)).toEqual({ kind: "none" });
+  });
+});
+
+describe("sidebarHoldDropTarget", () => {
+  const target = (drop: Parameters<typeof sidebarHoldDropTarget>[0]["drop"]) =>
+    sidebarHoldDropTarget({
+      drop,
+      activeKey: "a2",
+      pinnedOrder: ["p1", "p2"],
+      activeOrder: ["a1", "a2", "a3"],
+    });
+
+  it("pins first from the strip and settles from the shelf", () => {
+    expect(target({ kind: "pin" })).toEqual({
+      section: "pinned",
+      pinnedOrder: ["a2", "p1", "p2"],
+      activeOrder: ["a1", "a3"],
+    });
+    expect(target({ kind: "settle" })).toEqual({
+      section: "settled",
+      pinnedOrder: ["p1", "p2"],
+      activeOrder: ["a1", "a3"],
+    });
+  });
+
+  it("places the thread beside a pinned or active row", () => {
+    expect(target({ kind: "after", key: "p1", section: "pinned" })?.pinnedOrder).toEqual([
+      "p1",
+      "a2",
+      "p2",
+    ]);
+    expect(target({ kind: "before", key: "a1", section: "active" })?.activeOrder).toEqual([
+      "a2",
+      "a1",
+      "a3",
+    ]);
+  });
+
+  it("is not a section move for filing or an empty drop", () => {
+    expect(target({ kind: "nest", key: "a1" })).toBeNull();
+    expect(target({ kind: "none" })).toBeNull();
   });
 });
