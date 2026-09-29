@@ -85,7 +85,7 @@ describe("branding logic", () => {
     expect(
       resolveServerBackedAppDisplayName({
         baseName: "T3 Code",
-        fallbackDisplayName: "T3 Code (Alpha)",
+        fallbackDisplayName: "T3 Code",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616.12",
       }),
@@ -96,21 +96,21 @@ describe("branding logic", () => {
     expect(
       resolveServerBackedAppDisplayName({
         baseName: "T3 Code",
-        fallbackDisplayName: "T3 Code (Alpha)",
+        fallbackDisplayName: "T3 Code",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.27",
       }),
-    ).toBe("T3 Code (Alpha)");
+    ).toBe("T3 Code");
   });
 
   it("keeps the fallback display name for malformed nightly primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
         baseName: "T3 Code",
-        fallbackDisplayName: "T3 Code (Alpha)",
+        fallbackDisplayName: "T3 Code",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616",
       }),
-    ).toBe("T3 Code (Alpha)");
+    ).toBe("T3 Code");
   });
 });
