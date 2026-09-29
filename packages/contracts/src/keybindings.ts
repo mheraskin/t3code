@@ -91,6 +91,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.branch",
   "chat.new",
   "chat.newLocal",
+  "chat.sideChat",
+  "chat.forkThread",
   "editor.openFavorite",
   "usage.cost",
   "usage.tokens",

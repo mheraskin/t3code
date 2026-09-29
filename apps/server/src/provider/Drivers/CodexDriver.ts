@@ -36,7 +36,7 @@ import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
+import { makeCodexAdapter, codexAdapterCapabilities } from "../Layers/CodexAdapter.ts";
 import * as ResetCreditCoordinator from "../Layers/resetCreditCoordinator.ts";
 import {
   checkCodexProviderStatus,
@@ -134,13 +134,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: DRIVER_KIND,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
           (cause) =>
@@ -172,6 +165,14 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         ),
       );
 
+      const stampIdentity = withInstanceIdentity({
+        instanceId,
+        driverKind: DRIVER_KIND,
+        displayName,
+        accentColor,
+        continuationGroupKey: continuationIdentity.continuationKey,
+        adapterCapabilities: codexAdapterCapabilities,
+      });
       // Build a managed snapshot whose settings never change — mutations come
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits

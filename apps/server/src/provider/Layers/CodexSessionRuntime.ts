@@ -182,6 +182,10 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
+  readonly forkFrom?: {
+    readonly resumeCursor: CodexResumeCursor;
+    readonly turnId?: TurnId;
+  };
   readonly appServerArgs?: ReadonlyArray<string>;
   /** The provider's model list; supplies the display name for runtime info. */
   readonly models?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
@@ -714,6 +718,8 @@ const CodexThreadResumeMetadata = Schema.Struct({
 });
 const decodeCodexThreadResumeMetadata = Schema.decodeUnknownEffect(CodexThreadResumeMetadata);
 
+type CodexThreadOpenMethod = "thread/start" | "thread/fork";
+
 interface CodexThreadOpenClient {
   readonly raw: {
     readonly request: (
@@ -723,13 +729,10 @@ interface CodexThreadOpenClient {
       },
     ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
   };
-  readonly request: (
-    method: "thread/start",
-    payload: CodexRpc.ClientRequestParamsByMethod["thread/start"],
-  ) => Effect.Effect<
-    CodexRpc.ClientRequestResponsesByMethod["thread/start"],
-    CodexErrors.CodexAppServerError
-  >;
+  readonly request: <M extends CodexThreadOpenMethod>(
+    method: M,
+    payload: CodexRpc.ClientRequestParamsByMethod[M],
+  ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
 }
 
 export const openCodexThread = (input: {
@@ -740,6 +743,12 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly forkFrom:
+    | {
+        readonly threadId: string;
+        readonly turnId?: TurnId;
+      }
+    | undefined;
 }): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -748,6 +757,15 @@ export const openCodexThread = (input: {
     model: input.requestedModel,
     serviceTier: input.serviceTier,
   });
+
+  if (input.forkFrom !== undefined) {
+    const { ephemeral: _ephemeral, ...forkStartParams } = startParams;
+    return input.client.request("thread/fork", {
+      threadId: input.forkFrom.threadId,
+      ...(input.forkFrom.turnId !== undefined ? { lastTurnId: input.forkFrom.turnId } : {}),
+      ...forkStartParams,
+    });
+  }
 
   if (resumeThreadId === undefined) {
     return input.client.request("thread/start", startParams);
@@ -2493,6 +2511,15 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        forkFrom:
+          options.forkFrom === undefined
+            ? undefined
+            : {
+                threadId: options.forkFrom.resumeCursor.threadId,
+                ...(options.forkFrom.turnId !== undefined
+                  ? { turnId: options.forkFrom.turnId }
+                  : {}),
+              },
       });
 
       const providerThreadId = opened.thread.id;

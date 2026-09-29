@@ -35,6 +35,7 @@ import {
   ThreadTurnStartRequestedPayload,
   SnapShotAccessibility,
   isProviderSendTurnSupportedImageMimeType,
+  threadProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
@@ -590,6 +591,40 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.modelSelection.instanceId, "codex");
+    assert.strictEqual(parsed.fork, undefined);
+    assert.strictEqual(parsed.sideChat, undefined);
+  }),
+);
+
+it.effect("decodes normalized thread fork overrides and side-chat metadata", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "thread.fork",
+      commandId: "cmd-fork-1",
+      threadId: "thread-fork",
+      sourceThreadId: "thread-source",
+      sourceTurnId: "turn-1",
+      sourceMessageId: "message-1",
+      modelSelection: {
+        instanceId: "codex-live",
+        model: "gpt-5.6-sol",
+      },
+      sideChat: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(command.type, "thread.fork");
+    if (command.type === "thread.fork") {
+      assert.strictEqual(command.sourceThreadId, "thread-source");
+      assert.strictEqual(command.modelSelection?.instanceId, "codex-live");
+      assert.strictEqual(command.sideChat, true);
+    }
+
+    const updated = yield* decodeThreadMetaUpdatedPayload({
+      threadId: "thread-fork",
+      sideChat: false,
+      updatedAt: "2026-01-01T00:00:01.000Z",
+    });
+    assert.strictEqual(updated.sideChat, false);
   }),
 );
 
@@ -697,8 +732,12 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
 
     assert.strictEqual(thread.settledOverride, null);
     assert.strictEqual(thread.settledAt, null);
+    assert.strictEqual(thread.fork, undefined);
+    assert.strictEqual(thread.sideChat, undefined);
     assert.strictEqual(shell.settledOverride, null);
     assert.strictEqual(shell.settledAt, null);
+    assert.strictEqual(shell.fork, undefined);
+    assert.strictEqual(shell.sideChat, undefined);
     // Pre-link servers omit the array entirely.
     assert.deepStrictEqual(thread.pullRequests, []);
     assert.deepStrictEqual(shell.pullRequests, []);
@@ -1688,3 +1727,33 @@ it.effect("encodes compatible icons inside snapshots and client commands", () =>
     assert.deepEqual(yield* decodeNightlyIcon(command.projectIcon), fallback);
   }),
 );
+
+it("threadProviderInstanceId follows a live session and ignores stopped or errored ones", () => {
+  const modelSelection = { instanceId: ProviderInstanceId.make("codex") };
+  const session = (status: OrchestrationSession["status"]) => ({
+    status,
+    providerInstanceId: ProviderInstanceId.make("codex-work"),
+  });
+
+  assert.strictEqual(threadProviderInstanceId({ modelSelection, session: null }), "codex");
+  assert.strictEqual(
+    threadProviderInstanceId({ modelSelection, session: session("ready") }),
+    "codex-work",
+  );
+  assert.strictEqual(
+    threadProviderInstanceId({ modelSelection, session: session("running") }),
+    "codex-work",
+  );
+  assert.strictEqual(
+    threadProviderInstanceId({ modelSelection, session: session("stopped") }),
+    "codex",
+  );
+  assert.strictEqual(
+    threadProviderInstanceId({ modelSelection, session: session("error") }),
+    "codex",
+  );
+  assert.strictEqual(
+    threadProviderInstanceId({ modelSelection, session: { status: "ready" } }),
+    "codex",
+  );
+});

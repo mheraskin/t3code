@@ -29,6 +29,7 @@ import {
   type OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
+  ThreadForkOrigin,
   ThreadLinkedPullRequest,
   ThreadTitleState,
   ThreadId,
@@ -63,6 +64,7 @@ import { ProjectionThreadProposedPlan } from "../../persistence/Services/Project
 import { ProjectionThreadPullRequest } from "../../persistence/ProjectionThreadPullRequests.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+import { ProjectionTurnState } from "../../persistence/Services/ProjectionTurns.ts";
 import {
   decodeThreadDetailPageCursor,
   encodeThreadDetailPageCursor,
@@ -131,6 +133,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     modelSelection: Schema.fromJsonString(ModelSelection),
     titleState: Schema.NullOr(Schema.fromJsonString(ThreadTitleState)),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    fork: Schema.NullOr(Schema.fromJsonString(ThreadForkOrigin)),
     branchPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
   }),
 );
@@ -213,6 +216,18 @@ const ThreadIdLookupInput = Schema.Struct({
 const TurnStartMessageLookupInput = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
+});
+const ThreadTurnStateLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  turnId: TurnId,
+});
+const ProjectionThreadTurnStateRowSchema = Schema.Struct({
+  state: ProjectionTurnState,
+  assistantMessageId: Schema.NullOr(MessageId),
+});
+const ProjectionForkSourceHeadRowSchema = Schema.Struct({
+  latestTurnId: Schema.NullOr(TurnId),
+  latestTurnState: Schema.NullOr(ProjectionTurnState),
 });
 const ThreadActivityKindsLookupInput = Schema.Struct({
   threadId: ThreadId,
@@ -495,6 +510,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
   const sql = yield* SqlClient.SqlClient;
+
+  // A thread is top-level unless it is a side chat whose parent is still
+  // active. Side chats outlive a deleted or archived parent as ordinary
+  // threads, so every "which threads does this project show" read shares
+  // this predicate. Expects the outer query to alias projection_threads as
+  // `threads`.
+  const topLevelThreadPredicate = sql`(
+    threads.side_chat = 0
+    OR NOT EXISTS (
+      SELECT 1
+      FROM projection_threads AS parents
+      WHERE parents.thread_id = json_extract(threads.fork_json, '$.sourceThreadId')
+        AND parents.deleted_at IS NULL
+        AND parents.archived_at IS NULL
+    )
+  )`;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const repositoryIdentityResolutionConcurrency = 4;
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
@@ -575,6 +606,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_json AS "fork",
+          side_chat AS "sideChat",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -623,6 +656,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_json AS "fork",
+          side_chat AS "sideChat",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -698,6 +733,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_json AS "fork",
+          side_chat AS "sideChat",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -1138,6 +1175,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ON projects.project_id = threads.project_id
           WHERE threads.deleted_at IS NULL
             AND threads.archived_at IS NULL
+            AND ${topLevelThreadPredicate}
             AND projects.deleted_at IS NULL
             AND messages.is_streaming = 0
             -- Only these two roles are searchable, and the CASE above depends
@@ -1230,12 +1268,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: ({ projectId }) =>
       sql`
         SELECT
-          thread_id AS "threadId"
-        FROM projection_threads
-        WHERE project_id = ${projectId}
-          AND deleted_at IS NULL
-          AND archived_at IS NULL
-        ORDER BY created_at ASC, thread_id ASC
+          threads.thread_id AS "threadId"
+        FROM projection_threads threads
+        WHERE threads.project_id = ${projectId}
+          AND threads.deleted_at IS NULL
+          AND threads.archived_at IS NULL
+          AND ${topLevelThreadPredicate}
+        ORDER BY threads.created_at ASC, threads.thread_id ASC
         LIMIT 1
       `,
   });
@@ -1302,6 +1341,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          fork_json AS "fork",
+          side_chat AS "sideChat",
           branch_pull_request_json AS "branchPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -1695,6 +1736,40 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE threads.thread_id = ${threadId}
           AND threads.deleted_at IS NULL
           AND threads.archived_at IS NULL
+        LIMIT 1
+      `,
+  });
+
+  const getThreadTurnStateRow = SqlSchema.findOneOption({
+    Request: ThreadTurnStateLookupInput,
+    Result: ProjectionThreadTurnStateRowSchema,
+    execute: ({ threadId, turnId }) =>
+      sql`
+        SELECT
+          state,
+          assistant_message_id AS "assistantMessageId"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+        LIMIT 1
+      `,
+  });
+
+  // Archived sources keep their head; only a deleted row disappears.
+  const getForkSourceHeadRow = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionForkSourceHeadRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          threads.latest_turn_id AS "latestTurnId",
+          turns.state AS "latestTurnState"
+        FROM projection_threads threads
+        LEFT JOIN projection_turns turns
+          ON turns.thread_id = threads.thread_id
+          AND turns.turn_id = threads.latest_turn_id
+        WHERE threads.thread_id = ${threadId}
+          AND threads.deleted_at IS NULL
         LIMIT 1
       `,
   });
@@ -2379,6 +2454,8 @@ pending_approval_requests AS (
                   repositoryIdentities.get(row.projectId),
                 ),
                 branchPullRequest: row.branchPullRequest,
+                ...(row.fork == null ? {} : { fork: row.fork }),
+                ...(row.sideChat === 1 ? { sideChat: true } : {}),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2625,6 +2702,8 @@ pending_approval_requests AS (
                     repositoryIdentities.get(row.projectId),
                   ),
                   branchPullRequest: row.branchPullRequest,
+                  ...(row.fork == null ? {} : { fork: row.fork }),
+                  ...(row.sideChat === 1 ? { sideChat: true } : {}),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2786,6 +2865,8 @@ pending_approval_requests AS (
                           row.projectId,
                           repositoryIdentities.get(row.projectId),
                         ),
+                        ...(row.fork == null ? {} : { fork: row.fork }),
+                        ...(row.sideChat === 1 ? { sideChat: true } : {}),
                         latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                         createdAt: row.createdAt,
                         updatedAt: row.updatedAt,
@@ -2972,6 +3053,8 @@ pending_approval_requests AS (
                     row.projectId,
                     repositoryIdentities.get(row.projectId),
                   ),
+                  ...(row.fork == null ? {} : { fork: row.fork }),
+                  ...(row.sideChat === 1 ? { sideChat: true } : {}),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -3321,6 +3404,8 @@ pending_approval_requests AS (
                 ?.repositoryIdentity,
         ),
         branchPullRequest: threadRow.value.branchPullRequest,
+        ...(threadRow.value.fork == null ? {} : { fork: threadRow.value.fork }),
+        ...(threadRow.value.sideChat === 1 ? { sideChat: true } : {}),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -3347,6 +3432,37 @@ pending_approval_requests AS (
         planProgress: threadPlanProgress.getThreadPlanProgress(threadRow.value.threadId),
       } satisfies OrchestrationThreadShell);
     });
+
+  const getForkSourceHead: ProjectionSnapshotQueryShape["getForkSourceHead"] = (threadId) =>
+    getForkSourceHeadRow({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getForkSourceHead:query",
+          "ProjectionSnapshotQuery.getForkSourceHead:decodeRow",
+        ),
+      ),
+      Effect.map(
+        Option.map((row) => ({
+          latestTurn:
+            row.latestTurnId !== null && row.latestTurnState !== null
+              ? { turnId: row.latestTurnId, state: row.latestTurnState }
+              : null,
+        })),
+      ),
+    );
+
+  const getThreadTurnState: ProjectionSnapshotQueryShape["getThreadTurnState"] = (
+    threadId,
+    turnId,
+  ) =>
+    getThreadTurnStateRow({ threadId, turnId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadTurnState:query",
+          "ProjectionSnapshotQuery.getThreadTurnState:decodeRow",
+        ),
+      ),
+    );
 
   const getThreadRuntimeContext: ProjectionSnapshotQueryShape["getThreadRuntimeContext"] =
     Effect.fn("ProjectionSnapshotQuery.getThreadRuntimeContext")(function* (threadId) {
@@ -3623,6 +3739,8 @@ pending_approval_requests AS (
                 ?.repositoryIdentity,
         ),
         branchPullRequest: threadRow.value.branchPullRequest,
+        ...(threadRow.value.fork == null ? {} : { fork: threadRow.value.fork }),
+        ...(threadRow.value.sideChat === 1 ? { sideChat: true } : {}),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -3857,6 +3975,8 @@ pending_approval_requests AS (
     getThreadCheckpointContext,
     getFullThreadDiffContext,
     getThreadShellById,
+    getThreadTurnState,
+    getForkSourceHead,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,

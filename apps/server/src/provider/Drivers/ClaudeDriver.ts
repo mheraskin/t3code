@@ -153,13 +153,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           ? configDir
           : undefined,
       );
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: DRIVER_KIND,
-        displayName,
-        accentColor,
-        continuationGroupKey,
-      });
 
       // One per instance: the status probe writes the model-scoped bucket
       // names it saw, the adapter reads them to place turn-driven events.
@@ -172,6 +165,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
+      const stampIdentity = withInstanceIdentity({
+        instanceId,
+        driverKind: DRIVER_KIND,
+        displayName,
+        accentColor,
+        continuationGroupKey,
+        adapterCapabilities: adapter.capabilities,
+      });
       const textGeneration = yield* makeClaudeTextGeneration(
         effectiveConfig,
         processEnv,

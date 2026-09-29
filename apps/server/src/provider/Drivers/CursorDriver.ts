@@ -25,7 +25,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeCursorAdapter } from "../Layers/CursorAdapter.ts";
+import { makeCursorAdapter, cursorAdapterCapabilities } from "../Layers/CursorAdapter.ts";
 import { readCursorUsageLimits } from "../Layers/cursorUsageLimits.ts";
 import {
   buildInitialCursorProviderSnapshot,
@@ -113,13 +113,6 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         driverKind: DRIVER_KIND,
         instanceId,
       });
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: DRIVER_KIND,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
       const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
@@ -132,6 +125,14 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         ),
       );
 
+      const stampIdentity = withInstanceIdentity({
+        instanceId,
+        driverKind: DRIVER_KIND,
+        displayName,
+        accentColor,
+        continuationGroupKey: continuationIdentity.continuationKey,
+        adapterCapabilities: cursorAdapterCapabilities,
+      });
       const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv);
 
       const modelDiscovery = yield* makeCursorModelDiscovery(effectiveConfig, processEnv);

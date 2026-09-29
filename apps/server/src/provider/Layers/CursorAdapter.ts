@@ -1,3 +1,5 @@
+export const cursorAdapterCapabilities = { sessionModelSwitch: "in-session", supportsConversationRollback: false, sessionFork: "unsupported" } as const;
+
 /**
  * CursorAdapterLive — Cursor CLI (`agent acp`) via ACP.
  *
@@ -1270,7 +1272,7 @@ export function makeCursorAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session", supportsConversationRollback: false },
+      capabilities: cursorAdapterCapabilities,
       compaction: { type: "slash-command", command: "/compress" },
       startSession,
       sendTurn,

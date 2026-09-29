@@ -1,3 +1,9 @@
+export const codexAdapterCapabilities = {
+      sessionModelSwitch: "in-session",
+      sessionFork: "any-turn",
+      promptlessTurnContinuation: true,
+    } as const;
+
 /**
  * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
  *
@@ -2275,6 +2281,24 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const forkResumeCursor =
+          input.forkFrom !== undefined && isCodexResumeCursorSchema(input.forkFrom.resumeCursor)
+            ? input.forkFrom.resumeCursor
+            : undefined;
+        if (input.forkFrom !== undefined && forkResumeCursor === undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: "Codex fork source is missing a valid thread cursor.",
+          });
+        }
+        const forkFrom =
+          input.forkFrom !== undefined && forkResumeCursor !== undefined
+            ? {
+                resumeCursor: forkResumeCursor,
+                ...(input.forkFrom.turnId !== undefined ? { turnId: input.forkFrom.turnId } : {}),
+              }
+            : undefined;
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -2287,6 +2311,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
+          ...(forkFrom !== undefined ? { forkFrom } : {}),
           runtimeMode: input.runtimeMode,
           ...(input.modelSelection?.instanceId === boundInstanceId
             ? { model: input.modelSelection.model }
@@ -2724,10 +2749,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   return {
     provider: PROVIDER,
-    capabilities: {
-      sessionModelSwitch: "in-session",
-      promptlessTurnContinuation: true,
-    },
+    capabilities: codexAdapterCapabilities,
     startSession,
     sendTurn,
     compaction: { type: "native", start: compactThread },
