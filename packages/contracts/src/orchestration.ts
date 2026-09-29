@@ -870,6 +870,10 @@ export const OrchestrationThread = Schema.Struct({
   // Manual Active placement. Keyless threads retain their creation/re-entry
   // order above the arranged run. Settling clears this slot.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Sidebar organization only: the thread this one is filed under. One level
+  // deep; nothing else about either thread changes. Optional so payloads from
+  // older servers still decode.
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   // Set while the user has turned automatic settlement off for this thread.
   // Survives manual settle, un-settle, and activity: only the user clears it.
   // Optional so payloads from older servers still decode.
@@ -946,6 +950,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
@@ -1292,6 +1297,14 @@ const ThreadActiveReorderCommand = Schema.Struct({
   orderKey: TrimmedNonEmptyString,
 });
 
+const ThreadParentSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.parent.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  /** Null moves the thread back to the top level. */
+  parentThreadId: Schema.NullOr(ThreadId),
+});
+
 const ThreadMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("thread.meta.update"),
   commandId: CommandId,
@@ -1497,6 +1510,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadPinReorderCommand,
   ThreadAutoSettleSetCommand,
   ThreadActiveReorderCommand,
+  ThreadParentSetCommand,
   ThreadMetaUpdateCommand,
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
@@ -1532,6 +1546,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadPinReorderCommand,
   ThreadAutoSettleSetCommand,
   ThreadActiveReorderCommand,
+  ThreadParentSetCommand,
   ThreadMetaUpdateCommand,
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
@@ -1912,6 +1927,8 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   // Order updates use this existing event so older clients can ignore the
   // new field while continuing to decode the event stream.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Sub-thread filing travels the same way; null removes the parent.
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   title: Schema.optional(TrimmedNonEmptyString),
   /** Intent marker consumed by the title-generation reactor. Keeping this on
       the existing event lets older clients safely ignore the new field. */

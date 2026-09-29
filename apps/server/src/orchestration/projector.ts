@@ -655,6 +655,9 @@ export function projectEvent(
               ...(payload.activeOrderKey !== undefined
                 ? { activeOrderKey: payload.activeOrderKey }
                 : {}),
+              ...(payload.parentThreadId !== undefined
+                ? { parentThreadId: payload.parentThreadId }
+                : {}),
               ...(payload.sideChat !== undefined ? { sideChat: payload.sideChat } : {}),
               ...(payload.branchPullRequest !== undefined
                 ? { branchPullRequest: payload.branchPullRequest }

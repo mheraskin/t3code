@@ -1017,6 +1017,57 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.parent.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const invariant = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (thread.deletedAt !== null) {
+        return yield* invariant(`thread ${command.threadId} is deleted`);
+      }
+      const parentThreadId = command.parentThreadId;
+      if (parentThreadId !== null) {
+        // Sub-threads are one level of sidebar organization: a parent is a
+        // top-level thread, and a thread that has children cannot be filed.
+        if (parentThreadId === command.threadId) {
+          return yield* invariant(`thread ${command.threadId} cannot be its own parent`);
+        }
+        const parent = yield* requireThread({ readModel, command, threadId: parentThreadId });
+        if (parent.deletedAt !== null) {
+          return yield* invariant(`parent thread ${parentThreadId} is deleted`);
+        }
+        if (parent.parentThreadId != null) {
+          return yield* invariant(`parent thread ${parentThreadId} is itself a sub-thread`);
+        }
+        if (
+          readModel.threads.some(
+            (candidate) =>
+              candidate.parentThreadId === command.threadId && candidate.deletedAt === null,
+          )
+        ) {
+          return yield* invariant(`thread ${command.threadId} has sub-threads of its own`);
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: yield* nowIso,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          parentThreadId,
+          // Filing a thread is organization, not thread activity.
+          updatedAt: thread.updatedAt,
+        },
+      };
+    }
+
     case "thread.meta.update": {
       const thread = yield* requireThread({
         readModel,

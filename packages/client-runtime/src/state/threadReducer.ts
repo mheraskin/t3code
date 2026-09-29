@@ -289,6 +289,9 @@ export function applyThreadDetailEvent(
           ...(event.payload.activeOrderKey !== undefined
             ? { activeOrderKey: event.payload.activeOrderKey }
             : {}),
+          ...(event.payload.parentThreadId !== undefined
+            ? { parentThreadId: event.payload.parentThreadId }
+            : {}),
           updatedAt: event.payload.updatedAt,
         },
       };
