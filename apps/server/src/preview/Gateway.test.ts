@@ -12,6 +12,7 @@ import {
   handleGatewayRequest,
   handleGatewayUpgrade,
   rewriteLocation,
+  splitGatewayHost,
   signGatewayToken,
   stripT3Cookies,
   tailscaleAddresses,
@@ -62,7 +63,7 @@ const startUpstream = async (seen: Seen) => {
 };
 
 const startGateway = async (upstreamPort: number, onUpstreamGone = () => {}) => {
-  const handlers = { port: upstreamPort, secret, onUpstreamGone };
+  const handlers = { port: upstreamPort, secret, machineName: "xps", onUpstreamGone };
   const gateway = NodeHttp.createServer(handleGatewayRequest(handlers));
   gateway.on("upgrade", handleGatewayUpgrade(handlers));
   return `http://127.0.0.1:${await listen(gateway)}`;
@@ -154,7 +155,32 @@ describe("preview gateway", () => {
       redirect: "manual",
     });
 
-    expect(response.headers.get("location")).toBe(`${origin}/login`);
+    // In production the gateway listens on the upstream's port number.
+    expect(response.headers.get("location")).toBe(`http://127.0.0.1:${upstreamPort}/login`);
+  });
+
+  it("forwards a tenant subdomain of the machine name as a localhost subdomain", async () => {
+    const seen: Seen = {};
+    const upstreamPort = await startUpstream(seen);
+    const origin = new URL(await startGateway(upstreamPort));
+
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      NodeHttp.get(
+        {
+          host: origin.hostname,
+          port: origin.port,
+          path: "/dashboard",
+          headers: { host: `ember-oak.xps:${upstreamPort}`, cookie: cookieFor(upstreamPort) },
+        },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode);
+        },
+      ).on("error", reject);
+    });
+
+    expect(status).toBe(200);
+    expect(seen.host).toBe(`ember-oak.localhost:${upstreamPort}`);
   });
 
   it("relays authorized WebSocket upgrades", async () => {
@@ -206,12 +232,37 @@ describe("preview gateway helpers", () => {
   });
 
   it("leaves redirects to other origins alone", () => {
-    expect(rewriteLocation("https://example.com/x", 8971, "xps:8971")).toBe(
+    expect(rewriteLocation("https://example.com/x", 8971, "xps:8971", "xps")).toBe(
       "https://example.com/x",
     );
-    expect(rewriteLocation("http://127.0.0.1:8971/a?b#c", 8971, "xps:8971")).toBe(
+    expect(rewriteLocation("http://127.0.0.1:8971/a?b#c", 8971, "xps:8971", "xps")).toBe(
       "http://xps:8971/a?b#c",
     );
+  });
+
+  it("maps tenant redirects onto the machine name", () => {
+    expect(
+      rewriteLocation("http://demo.localhost:8971/order-ahead/", 8971, "ember-oak.xps:8971", "xps"),
+    ).toBe("http://demo.xps:8971/order-ahead/");
+    expect(rewriteLocation("http://demo.localhost:8971/", 8971, "100.99.182.95:8971", "xps")).toBe(
+      "http://100.99.182.95:8971/",
+    );
+  });
+
+  it("splits hosts around the machine name", () => {
+    expect(splitGatewayHost("ember-oak.xps:8971", "xps")).toEqual({
+      subdomain: "ember-oak",
+      base: "xps",
+    });
+    expect(splitGatewayHost("a.b.xps.tail1ab873.ts.net:1", "xps")).toEqual({
+      subdomain: "a.b",
+      base: "xps.tail1ab873.ts.net",
+    });
+    expect(splitGatewayHost("xps:8971", "xps")).toEqual({ subdomain: null, base: "xps" });
+    expect(splitGatewayHost("100.99.182.95:8971", "xps")).toEqual({
+      subdomain: null,
+      base: "100.99.182.95",
+    });
   });
 
   it("binds only Tailscale addresses", () => {

@@ -25,6 +25,7 @@ import * as NodeOs from "node:os";
 import {
   PREVIEW_GATEWAY_TOKEN_QUERY_PARAM,
   PreviewGatewayUnavailableError,
+  type PreviewOpenGatewayResult,
 } from "@t3tools/contracts";
 import { isTailscaleIpv4Address } from "@t3tools/tailscale";
 import * as Clock from "effect/Clock";
@@ -50,7 +51,7 @@ export class PreviewGateway extends Context.Service<
     /** Ensures the gateway serves `port` and returns a short-lived access token for it. */
     readonly open: (
       port: number,
-    ) => Effect.Effect<{ readonly token: string }, PreviewGatewayUnavailableError>;
+    ) => Effect.Effect<PreviewOpenGatewayResult, PreviewGatewayUnavailableError>;
   }
 >()("t3/preview/Gateway/PreviewGateway") {}
 
@@ -112,37 +113,69 @@ export const stripT3Cookies = (header: string | undefined): string | undefined =
   return kept.length > 0 ? kept.join("; ") : undefined;
 };
 
+/**
+ * Splits a gateway Host around this machine's name, so tenant-style subdomains
+ * survive: `ember-oak.xps:8971` has subdomain `ember-oak` and base `xps`. A host
+ * without the machine name, such as an IP, has no subdomain.
+ */
+export const splitGatewayHost = (
+  host: string,
+  machineName: string,
+): { readonly subdomain: string | null; readonly base: string } => {
+  const hostname = host.replace(/:\d+$/, "").toLowerCase();
+  const labels = hostname.split(".");
+  const index = labels.indexOf(machineName);
+  if (index <= 0) return { subdomain: null, base: hostname };
+  return { subdomain: labels.slice(0, index).join("."), base: labels.slice(index).join(".") };
+};
+
 const upstreamHeaders = (
   headers: NodeHttp.IncomingHttpHeaders,
   port: number,
+  machineName: string,
 ): NodeHttp.OutgoingHttpHeaders => {
   const { cookie, host, ...rest } = headers;
   const forwardedCookie = stripT3Cookies(cookie);
+  const subdomain = host ? splitGatewayHost(host, machineName).subdomain : null;
   return {
     ...rest,
     // Dev servers check Host (Vite's allowedHosts, nginx vhosts); present the
-    // request as the local one it replaces.
-    host: `localhost:${port}`,
+    // request as the local one it replaces, keeping any `<tenant>.localhost`.
+    host: subdomain ? `${subdomain}.localhost:${port}` : `localhost:${port}`,
     ...(host ? { "x-forwarded-host": host } : {}),
     "x-forwarded-proto": "http",
     ...(forwardedCookie ? { cookie: forwardedCookie } : {}),
   };
 };
 
-/** Points upstream redirects to `localhost:<port>` back at the gateway origin. */
+const LOCALHOST_SUFFIX = ".localhost";
+
+/** Points upstream redirects to `[<sub>.]localhost:<port>` back at the gateway origin. */
 export const rewriteLocation = (
   location: string,
   port: number,
   gatewayHost: string | undefined,
+  machineName: string,
 ): string => {
   if (!gatewayHost) return location;
   try {
     const url = new URL(location);
+    const hostname = url.hostname;
     const isUpstream =
-      (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]") &&
+      (hostname === "localhost" ||
+        hostname.endsWith(LOCALHOST_SUFFIX) ||
+        hostname === "127.0.0.1" ||
+        hostname === "[::1]") &&
       url.port === String(port);
     if (!isUpstream) return location;
-    return `http://${gatewayHost}${url.pathname}${url.search}${url.hash}`;
+    const { base } = splitGatewayHost(gatewayHost, machineName);
+    const subdomain = hostname.endsWith(LOCALHOST_SUFFIX)
+      ? hostname.slice(0, -LOCALHOST_SUFFIX.length)
+      : null;
+    // An IP base cannot carry a subdomain.
+    const isIpBase = base.startsWith("[") || /^[\d.]+$/.test(base);
+    const targetHost = subdomain && !isIpBase ? `${subdomain}.${base}` : base;
+    return `http://${targetHost}:${port}${url.pathname}${url.search}${url.hash}`;
   } catch {
     return location;
   }
@@ -161,6 +194,8 @@ export const tailscaleAddresses = (
 
 interface GatewayHandlers {
   readonly port: number;
+  /** This machine's short name, as used in MagicDNS hosts like `ember-oak.xps`. */
+  readonly machineName: string;
   readonly secret: Uint8Array;
   readonly onUpstreamGone: () => void;
 }
@@ -211,12 +246,17 @@ export const handleGatewayRequest =
         port,
         method: request.method,
         path: request.url,
-        headers: upstreamHeaders(request.headers, port),
+        headers: upstreamHeaders(request.headers, port, handlers.machineName),
       },
       (upstreamResponse) => {
         const headers = { ...upstreamResponse.headers };
         if (typeof headers.location === "string") {
-          headers.location = rewriteLocation(headers.location, port, request.headers.host);
+          headers.location = rewriteLocation(
+            headers.location,
+            port,
+            request.headers.host,
+            handlers.machineName,
+          );
         }
         response.writeHead(upstreamResponse.statusCode ?? 502, headers);
         upstreamResponse.pipe(response);
@@ -243,7 +283,7 @@ export const handleGatewayUpgrade =
       return;
     }
     const upstream = NodeNet.connect({ host: "localhost", port: handlers.port }, () => {
-      const headers = upstreamHeaders(request.headers, handlers.port);
+      const headers = upstreamHeaders(request.headers, handlers.port, handlers.machineName);
       const lines = [`${request.method} ${request.url} HTTP/1.1`];
       for (const [name, value] of Object.entries(headers)) {
         if (value === undefined) continue;
@@ -277,6 +317,9 @@ export const make = Effect.gen(function* PreviewGatewayMake() {
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const openLock = yield* Semaphore.make(1);
   const listeners = new Map<number, ReadonlyArray<NodeHttp.Server>>();
+  // Tailscale names machines after their hostname, which MagicDNS resolves as
+  // `xps` and, on clients that allow it, `<tenant>.xps`.
+  const machineName = NodeOs.hostname().split(".")[0]!.toLowerCase();
 
   const closePort = (port: number) => {
     const servers = listeners.get(port);
@@ -302,7 +345,12 @@ export const make = Effect.gen(function* PreviewGatewayMake() {
     if (listeners.has(port)) return;
     const addresses = tailscaleAddresses();
     if (addresses.length === 0) return yield* unavailable(port, "no-tailscale-address");
-    const handlers: GatewayHandlers = { port, secret, onUpstreamGone: () => closePort(port) };
+    const handlers: GatewayHandlers = {
+      port,
+      secret,
+      machineName,
+      onUpstreamGone: () => closePort(port),
+    };
     const bound: NodeHttp.Server[] = [];
     for (const address of addresses) {
       const server = NodeHttp.createServer(handleGatewayRequest(handlers));
@@ -329,7 +377,10 @@ export const make = Effect.gen(function* PreviewGatewayMake() {
         .pipe(Effect.mapError(() => unavailable(port, "unexpected")));
       yield* openLock.withPermits(1)(ensureListening(port, secret));
       const now = yield* Clock.currentTimeMillis;
-      return { token: signGatewayToken({ port, expiresAt: now + URL_TOKEN_TTL_MS }, secret) };
+      return {
+        token: signGatewayToken({ port, expiresAt: now + URL_TOKEN_TTL_MS }, secret),
+        hostname: machineName,
+      };
     },
   );
 
