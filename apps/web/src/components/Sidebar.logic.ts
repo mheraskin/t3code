@@ -285,7 +285,15 @@ export type SidebarThreadDropPlan =
 /** What dropping in `to` does to a thread lifted from `from`, for the badge
     on the lifted row. Null while reordering inside one section and for the
     snoozed shelf, which cannot be a drop target. */
-export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake" | "nest";
+export type SidebarDropVerb =
+  | "pin"
+  | "unpin"
+  | "settle"
+  | "unsettle"
+  | "wake"
+  | "nest"
+  /** Shown while reordering a thread that could be filed instead. */
+  | "nest-hint";
 
 export function resolveSidebarDropVerb(
   from: SidebarSection,

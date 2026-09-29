@@ -1036,6 +1036,12 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
       File under
     </>
   ),
+  "nest-hint": (
+    <>
+      <CornerDownRightIcon aria-hidden className="size-3" />
+      Pull right to file under
+    </>
+  ),
   pin: (
     <>
       <PinIcon aria-hidden className="size-3" />
@@ -3430,6 +3436,7 @@ export default function Sidebar() {
   const dragStartXRef = useRef<number | null>(null);
   const [nesting, setNesting] = useState(false);
   const [nestTargetKey, setNestTargetKey] = useState<string | null>(null);
+  const [draggedCanFile, setDraggedCanFile] = useState(false);
   const nestTargetRef = useRef<string | null>(null);
   nestTargetRef.current = nestTargetKey;
   const nestingRef = useRef(false);
@@ -3841,16 +3848,31 @@ export default function Sidebar() {
     [threads],
   );
   const draggedKeyForNesting = dragState?.activeKey ?? null;
+  // Shell updates stream in constantly while agents work; the listener reads
+  // the latest lookups through a ref so it survives them for the whole drag.
+  const nestingLookupsRef = useRef({
+    parentThreadKeys,
+    sectionByThreadKey,
+    serverConfigs,
+    threadByKey,
+  });
+  nestingLookupsRef.current = { parentThreadKeys, sectionByThreadKey, serverConfigs, threadByKey };
   useEffect(() => {
     setNesting(false);
     setNestTargetKey(null);
+    setDraggedCanFile(false);
     if (draggedKeyForNesting === null) return;
-    const dragged = threadByKey.get(draggedKeyForNesting);
-    const canFile =
-      dragged !== undefined &&
-      !parentThreadKeys.has(draggedKeyForNesting) &&
-      serverConfigs.get(dragged.environmentId)?.environment.capabilities.threadParenting === true;
-    if (!canFile) return;
+    const lookups = nestingLookupsRef.current;
+    const dragged = lookups.threadByKey.get(draggedKeyForNesting);
+    if (
+      dragged === undefined ||
+      lookups.parentThreadKeys.has(draggedKeyForNesting) ||
+      lookups.serverConfigs.get(dragged.environmentId)?.environment.capabilities.threadParenting !==
+        true
+    ) {
+      return;
+    }
+    setDraggedCanFile(true);
     const onPointerMove = (event: PointerEvent) => {
       const startX = dragStartXRef.current;
       const filing = startX !== null && event.clientX - startX > SIDEBAR_NEST_OFFSET_PX;
@@ -3859,16 +3881,17 @@ export default function Sidebar() {
         setNestTargetKey(null);
         return;
       }
+      const { sectionByThreadKey: sections, threadByKey: threadsByKey } = nestingLookupsRef.current;
       const targetKey =
         document
           .elementsFromPoint(event.clientX, event.clientY)
           .map((element) => element.closest<HTMLElement>("[data-thread-key]")?.dataset.threadKey)
           .find((key) => key !== undefined && key !== draggedKeyForNesting) ?? null;
-      const target = targetKey === null ? undefined : threadByKey.get(targetKey);
+      const target = targetKey === null ? undefined : threadsByKey.get(targetKey);
       // A parent is a top-level Active thread on the same environment.
       setNestTargetKey(
         target !== undefined &&
-          sectionByThreadKey.get(targetKey!) === "active" &&
+          sections.get(targetKey!) === "active" &&
           target.environmentId === dragged.environmentId &&
           !target.parentThreadId
           ? targetKey
@@ -3877,7 +3900,7 @@ export default function Sidebar() {
     };
     window.addEventListener("pointermove", onPointerMove);
     return () => window.removeEventListener("pointermove", onPointerMove);
-  }, [draggedKeyForNesting, parentThreadKeys, sectionByThreadKey, serverConfigs, threadByKey]);
+  }, [draggedKeyForNesting]);
 
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -4430,6 +4453,20 @@ export default function Sidebar() {
                 : null,
               isPinned,
               isSubThread: Boolean(thread.parentThreadId),
+              subThreadParents:
+                serverConfigs.get(thread.environmentId)?.environment.capabilities
+                  .threadParenting === true && !parentThreadKeys.has(threadKey)
+                  ? activeThreads
+                      .filter(
+                        (candidate) =>
+                          candidate.environmentId === thread.environmentId &&
+                          candidate.id !== thread.id &&
+                          candidate.id !== thread.parentThreadId &&
+                          !candidate.parentThreadId,
+                      )
+                      .slice(0, 20)
+                      .map((candidate) => ({ id: candidate.id, title: candidate.title }))
+                  : [],
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
@@ -4461,6 +4498,13 @@ export default function Sidebar() {
               ? await requestCustomSnooze()
               : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
           if (preset) attemptSnooze(threadRef, preset);
+          return;
+        }
+        if (clicked.value?.startsWith("file-under:")) {
+          await setThreadParent(
+            threadRef,
+            ThreadId.make(clicked.value.slice("file-under:".length)),
+          );
           return;
         }
         if (clicked.value?.startsWith("open-existing-side-chat:")) {
@@ -4668,6 +4712,7 @@ export default function Sidebar() {
       })();
     },
     [
+      activeThreads,
       archiveThread,
       attemptPin,
       attemptSettle,
@@ -4684,12 +4729,14 @@ export default function Sidebar() {
       handleMultiSelectContextMenu,
       markThreadUnread,
       openProjectSettings,
+      parentThreadKeys,
       projectScopeKey,
       projectByKey,
       router,
       serverConfigs,
       setProjectScopeKey,
       setThreadAutoSettle,
+      setThreadParent,
       startThreadRename,
       threadFork,
       updateThreadMetadata,
@@ -5130,10 +5177,10 @@ export default function Sidebar() {
                                   ? nestTargetKey === null
                                     ? null
                                     : "nest"
-                                  : resolveSidebarDropVerb(
+                                  : (resolveSidebarDropVerb(
                                       dragState.activeSection,
                                       dragTargetSection,
-                                    )
+                                    ) ?? (draggedCanFile ? "nest-hint" : null))
                             }
                             dragOverPinned={
                               dragState?.activeKey === threadKey && dragTargetSection === "pinned"

@@ -17,6 +17,8 @@ export type ThreadActionMenuId =
   | "pin"
   | "unpin"
   | "move-out-of-parent"
+  | "file-under"
+  | `file-under:${string}`
   | "settle"
   | "unsettle"
   | "auto-settle"
@@ -49,6 +51,8 @@ export interface ThreadActionMenuState {
   readonly isPinned: boolean;
   /** Filed under another thread in the sidebar; offers the way back out. */
   readonly isSubThread?: boolean;
+  /** Threads this one can be filed under, in sidebar order. Empty hides the item. */
+  readonly subThreadParents?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
   readonly autoSettleEnabled: boolean;
@@ -121,6 +125,19 @@ export function buildThreadActionMenuItems(
                 },
               ]
             : []),
+        ]
+      : []),
+    ...(state.subThreadParents && state.subThreadParents.length > 0
+      ? [
+          {
+            id: "file-under" as const,
+            label: "Make sub-thread of",
+            icon: "folder-tree",
+            children: state.subThreadParents.map((parent) => ({
+              id: `file-under:${parent.id}` as const,
+              label: parent.title,
+            })),
+          },
         ]
       : []),
     ...(state.isSubThread

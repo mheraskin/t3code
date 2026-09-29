@@ -82,6 +82,22 @@ describe("buildThreadActionMenuItems", () => {
     expect(items[filterIndex + 1]?.id).toBe("auto-settle");
   });
 
+  it("offers filing under a parent only when there are candidates, and the way back out", () => {
+    const withParents = buildThreadActionMenuItems({
+      ...baseState,
+      subThreadParents: [{ id: "parent-1", title: "Parent" }],
+    });
+    const fileUnder = withParents.find((item) => item.id === "file-under");
+    expect(fileUnder?.children?.map((child) => [child.id, child.label])).toEqual([
+      ["file-under:parent-1", "Parent"],
+    ]);
+    const ids = (state: ThreadActionMenuState) =>
+      buildThreadActionMenuItems(state).map((item) => item.id);
+    expect(ids({ ...baseState, subThreadParents: [] })).not.toContain("file-under");
+    expect(ids({ ...baseState, isSubThread: true })).toContain("move-out-of-parent");
+    expect(ids(baseState)).not.toContain("move-out-of-parent");
+  });
+
   it("includes branch items only for threads with a branch", () => {
     const withBranch = allIds({ ...baseState, branch: "feat/menu" });
     expect(withBranch).toContain("new-thread-on-branch");
