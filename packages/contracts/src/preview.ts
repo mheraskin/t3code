@@ -367,6 +367,8 @@ export type PreviewOpenGatewayInput = typeof PreviewOpenGatewayInput.Type;
 
 export const PreviewOpenGatewayResult = Schema.Struct({
   token: TrimmedNonEmptyString,
+  /** The host's MagicDNS short name, preferred over its IP so tenant subdomains resolve. */
+  hostname: Schema.optional(TrimmedNonEmptyString),
 });
 export type PreviewOpenGatewayResult = typeof PreviewOpenGatewayResult.Type;
 

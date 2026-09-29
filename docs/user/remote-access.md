@@ -124,7 +124,8 @@ When the desktop app connects to an environment by its Tailscale address or Magi
 name, dev servers on that host open in the browser panel even if they listen only on
 `localhost`. This applies to servers under **Local servers**, `localhost` links in the
 terminal, and `localhost` addresses typed into the panel. The host serves each one on its
-Tailscale address at the same port, only to T3 Code clients.
+Tailscale address at the same port, only to T3 Code clients. Links use the host's MagicDNS
+name, so a subdomain such as `acme.localhost:8080` opens as `acme.<host>:8080`.
 
 The port must be free on the host's Tailscale address. A `tailscale serve` rule on the
 same port blocks it; remove the rule with `tailscale serve --tcp <port> off`. HTTPS dev
