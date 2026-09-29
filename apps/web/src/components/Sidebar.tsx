@@ -186,6 +186,7 @@ import {
   resolveAdjacentThreadId,
   resolveSidebarHoldDrop,
   resolveThreadAfterPark,
+  resolveThreadJumpKeys,
   sidebarHoldDropSection,
   sidebarHoldDropTarget,
   type SidebarHoldDrop,
@@ -3110,16 +3111,25 @@ export default function Sidebar() {
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
   snoozedThreadKeysRef.current = snoozedThreadKeys;
 
+  const jumpThreadKeys = useMemo(
+    () =>
+      resolveThreadJumpKeys({
+        orderedKeys: orderedThreadKeys,
+        currentKey: routeThreadKey,
+        groupOf: (key) => displayGroupByThreadKey.get(key),
+      }),
+    [displayGroupByThreadKey, orderedThreadKeys, routeThreadKey],
+  );
   const jumpLabelByKey = useMemo(() => {
     const mapping = new Map<string, string>();
-    for (const [index, threadKey] of orderedThreadKeys.entries()) {
+    for (const [index, threadKey] of jumpThreadKeys.entries()) {
       const jumpCommand = threadJumpCommandForIndex(index);
       if (!jumpCommand) break;
       const label = shortcutLabelForCommand(keybindings, jumpCommand);
       if (label) mapping.set(threadKey, label);
     }
     return mapping;
-  }, [keybindings, orderedThreadKeys]);
+  }, [jumpThreadKeys, keybindings]);
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
 
   // Settled threads are live shells, so opening one is plain navigation:
@@ -4795,11 +4805,12 @@ export default function Sidebar() {
       }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
       if (jumpIndex === null) return;
-      navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
+      navigateToThreadKey(jumpThreadKeys[jumpIndex] ?? null);
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
+    jumpThreadKeys,
     keybindings,
     navigateToThread,
     orderedThreadKeys,

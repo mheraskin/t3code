@@ -35,6 +35,7 @@ import {
   nestSubThreads,
   resolveSidebarHoldDrop,
   resolveThreadAfterPark,
+  resolveThreadJumpKeys,
   sidebarHoldDropTarget,
   pinOrderKeyBetween,
   planPinnedReorder,
@@ -2522,5 +2523,26 @@ describe("resolveThreadAfterPark", () => {
     expect(after("b1")).toBe("p1");
     expect(after("a2", ["a1", "a3"])).toBe("b1");
     expect(after("p1")).toBe("a1");
+  });
+});
+
+describe("resolveThreadJumpKeys", () => {
+  const orderedKeys = ["p1", "a1", "a2", "b1"];
+  const groups = new Map([
+    ["a1", "feat"],
+    ["a2", "feat"],
+    ["b1", "main"],
+  ]);
+  const jumpKeys = (currentKey: string | null) =>
+    resolveThreadJumpKeys({ orderedKeys, currentKey, groupOf: (key) => groups.get(key) });
+
+  it("limits jumps to the open thread's branch group", () => {
+    expect(jumpKeys("a2")).toEqual(["a1", "a2"]);
+    expect(jumpKeys("b1")).toEqual(["b1"]);
+  });
+
+  it("reaches the whole list outside a group", () => {
+    expect(jumpKeys("p1")).toEqual(orderedKeys);
+    expect(jumpKeys(null)).toEqual(orderedKeys);
   });
 });

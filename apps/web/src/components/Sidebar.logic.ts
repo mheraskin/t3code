@@ -322,6 +322,20 @@ export function resolveThreadAfterPark(input: {
   );
 }
 
+/** The threads ⌘1–9 reach: the open thread's branch group when it has one,
+    so the numbers stay on the work at hand; otherwise the whole list. */
+export function resolveThreadJumpKeys(input: {
+  readonly orderedKeys: readonly string[];
+  readonly currentKey: string | null;
+  /** The branch group a row renders in; undefined outside Active. */
+  readonly groupOf: (key: string) => string | undefined;
+}): readonly string[] {
+  const group = input.currentKey === null ? undefined : input.groupOf(input.currentKey);
+  return group === undefined
+    ? input.orderedKeys
+    : input.orderedKeys.filter((key) => input.groupOf(key) === group);
+}
+
 export type SidebarThreadDropPlan =
   | { readonly kind: "none" }
   /** Within the pinned block: the existing key writes. */
