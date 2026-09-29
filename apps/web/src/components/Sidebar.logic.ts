@@ -150,10 +150,15 @@ export function sidebarMarkerId(marker: SidebarListMarker): string {
 
 export type SidebarListItem =
   | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
-  | { readonly kind: "marker"; readonly marker: SidebarListMarker };
+  | { readonly kind: "marker"; readonly marker: SidebarListMarker }
+  /** The worktree header above a run of active threads sharing a checkout.
+      Headers never take part in drops; the drag preview hides them. */
+  | { readonly kind: "group"; readonly key: string };
 
 export function sidebarListItemId(item: SidebarListItem): string {
-  return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker);
+  if (item.kind === "thread") return item.key;
+  if (item.kind === "group") return `sidebar-group-${item.key}`;
+  return sidebarMarkerId(item.marker);
 }
 
 /** The section a slot belongs to, read off the markers around it: from
@@ -199,10 +204,55 @@ export function resolveSidebarDropTarget(
     if (item.kind === "marker") {
       if (item.marker === "pinned-divider") currentSection = "active";
       else if (item.marker === "snoozed-header" || item.marker === "settled-header") break;
-    } else if (currentSection === "pinned") pinnedOrder.push(item.key);
-    else activeOrder.push(item.key);
+    } else if (item.kind === "thread") {
+      (currentSection === "pinned" ? pinnedOrder : activeOrder).push(item.key);
+    }
   }
   return { section, pinnedOrder, activeOrder };
+}
+
+/** Files sub-threads directly beneath their parent, wherever the parent's
+    group sits. A thread whose parent is not in the list (settled, pinned,
+    filtered, another section) keeps its own place, and so does a parent
+    that is itself filed: sub-threads are one level deep. Groups emptied by
+    the move drop out. */
+export function nestSubThreads<
+  TThread extends { readonly parentThreadId?: string | null | undefined },
+>(
+  groups: ReadonlyArray<{ readonly key: string; readonly threads: readonly TThread[] }>,
+  keyOf: (thread: TThread) => string,
+  parentKeyOf: (thread: TThread, parentThreadId: string) => string,
+): {
+  readonly groups: Array<{ readonly key: string; readonly threads: TThread[] }>;
+  readonly subThreadKeys: ReadonlySet<string>;
+} {
+  const byKey = new Map<string, TThread>();
+  for (const group of groups) for (const thread of group.threads) byKey.set(keyOf(thread), thread);
+  const presentParentKey = (thread: TThread) => {
+    if (!thread.parentThreadId) return null;
+    const parentKey = parentKeyOf(thread, thread.parentThreadId);
+    return parentKey !== keyOf(thread) && byKey.has(parentKey) ? parentKey : null;
+  };
+  const childrenByParent = new Map<string, TThread[]>();
+  const subThreadKeys = new Set<string>();
+  for (const group of groups) {
+    for (const thread of group.threads) {
+      const parentKey = presentParentKey(thread);
+      if (parentKey === null || presentParentKey(byKey.get(parentKey)!) !== null) continue;
+      const children = childrenByParent.get(parentKey);
+      if (children) children.push(thread);
+      else childrenByParent.set(parentKey, [thread]);
+      subThreadKeys.add(keyOf(thread));
+    }
+  }
+  const nested = groups.flatMap((group) => {
+    const threads = group.threads.flatMap((thread) => {
+      const key = keyOf(thread);
+      return subThreadKeys.has(key) ? [] : [thread, ...(childrenByParent.get(key) ?? [])];
+    });
+    return threads.length === 0 ? [] : [{ key: group.key, threads }];
+  });
+  return { groups: nested, subThreadKeys };
 }
 
 export type SidebarThreadDropPlan =
@@ -235,7 +285,7 @@ export type SidebarThreadDropPlan =
 /** What dropping in `to` does to a thread lifted from `from`, for the badge
     on the lifted row. Null while reordering inside one section and for the
     snoozed shelf, which cannot be a drop target. */
-export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake";
+export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake" | "nest";
 
 export function resolveSidebarDropVerb(
   from: SidebarSection,

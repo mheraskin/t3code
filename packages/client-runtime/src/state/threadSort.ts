@@ -372,6 +372,55 @@ export function sortActiveThreadsByOrderKey<
   });
 }
 
+export interface ThreadWorktreeGroupInput {
+  readonly projectId: string;
+  readonly environmentId?: string | undefined;
+  readonly worktreePath?: string | null | undefined;
+  readonly branch?: string | null | undefined;
+}
+
+/** Threads share a group when they work on the same branch of the same
+    project on one environment. Git checks a branch out in one place per
+    repository, so the branch names the checkout. `projectKey` should be the
+    logical (repository) project: users often register each worktree as its
+    own project record, and a thread's record need not match the worktree it
+    runs in. The path only keys threads that have no branch. */
+export function threadWorktreeGroupKey(
+  thread: ThreadWorktreeGroupInput,
+  projectKey: string = thread.projectId,
+): string {
+  const checkout = thread.branch
+    ? `branch:${thread.branch}`
+    : thread.worktreePath
+      ? `worktree:${thread.worktreePath}`
+      : "branch:";
+  return `${thread.environmentId ?? ""}:${projectKey}:${checkout}`;
+}
+
+/** Pull threads that share a checkout together, and a project's checkouts
+    together, without otherwise reordering: projects, their groups, and each
+    group's threads all keep the order of their first thread. Shared by web
+    and mobile so both render the same order. */
+export function groupThreadsByWorktree<T extends ThreadWorktreeGroupInput>(
+  threads: readonly T[],
+  projectKeyOf: (thread: T) => string = (thread) => thread.projectId,
+): Array<{ readonly key: string; readonly threads: T[] }> {
+  const projects = new Map<string, Map<string, T[]>>();
+  for (const thread of threads) {
+    const projectKey = projectKeyOf(thread);
+    const stackKey = `${thread.environmentId ?? ""}:${projectKey}`;
+    let groups = projects.get(stackKey);
+    if (!groups) projects.set(stackKey, (groups = new Map()));
+    const key = threadWorktreeGroupKey(thread, projectKey);
+    const members = groups.get(key);
+    if (members) members.push(thread);
+    else groups.set(key, [thread]);
+  }
+  return [...projects.values()].flatMap((groups) =>
+    [...groups].map(([key, members]) => ({ key, threads: members })),
+  );
+}
+
 /**
  * planPinnedReorder specialized for mobile's Move up / Move down menu
  * actions: swap the moved thread with its displayed neighbor. Null when the

@@ -128,6 +128,7 @@ export function createSidebarSortingStrategy(input: {
     let slimHeight = input.slimHeight;
     let headerScale: number | undefined;
     for (const [index, item] of items.entries()) {
+      if (item.kind === "group") continue;
       if (item.kind === "marker") {
         if (item.marker === "settled-header" || item.marker === "snoozed-header") {
           const height = rects[index]?.height;
@@ -204,7 +205,11 @@ export function createSidebarSortingStrategy(input: {
         : item.kind === "marker" && item.marker.endsWith("placeholder")
           ? slimHeight
           : moved
-            ? fallback
+            ? // Grouped active rows are shorter than pinned cards, so a row
+              // staying in its section keeps its own measured height.
+              target.section === active.section && rect
+              ? rect.height
+              : fallback
             : (rect?.height ?? fallback);
     });
     const firstShelf = items.findIndex(

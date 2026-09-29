@@ -223,6 +223,8 @@ export function useThreadActions() {
   const reorderActiveThreadMutation = useAtomCommand(threadEnvironment.reorderActive, {
     reportFailure: false,
   });
+  // Failures surface: the server explains why a thread cannot be filed there.
+  const setThreadParentMutation = useAtomCommand(threadEnvironment.setParent, "set-thread-parent");
   const snoozeThreadMutation = useAtomCommand(threadEnvironment.snooze, {
     reportFailure: false,
   });
@@ -808,6 +810,16 @@ export function useThreadActions() {
     [reorderActiveThreadMutation],
   );
 
+  /** Files a thread under a parent in the sidebar, or back to the top level with null. */
+  const setThreadParent = useCallback(
+    async (target: ScopedThreadRef, parentThreadId: ThreadId | null) =>
+      setThreadParentMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId, parentThreadId },
+      }),
+    [setThreadParentMutation],
+  );
+
   const unsnoozeThread = useCallback(
     async (target: ScopedThreadRef) => {
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
@@ -921,6 +933,7 @@ export function useThreadActions() {
       confirmAndUnpinThread,
       reorderPinnedThread,
       reorderActiveThread,
+      setThreadParent,
       setThreadAutoSettle,
     }),
     [
@@ -932,6 +945,7 @@ export function useThreadActions() {
       reorderPinnedThread,
       reorderActiveThread,
       setThreadAutoSettle,
+      setThreadParent,
       settleThread,
       snoozeThread,
       unarchiveThread,

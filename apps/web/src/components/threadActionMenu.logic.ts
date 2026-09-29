@@ -16,6 +16,7 @@ export type ThreadActionMenuId =
   | "project-settings"
   | "pin"
   | "unpin"
+  | "move-out-of-parent"
   | "settle"
   | "unsettle"
   | "auto-settle"
@@ -46,6 +47,8 @@ export interface ThreadActionMenuState {
     readonly isActive: boolean;
   } | null;
   readonly isPinned: boolean;
+  /** Filed under another thread in the sidebar; offers the way back out. */
+  readonly isSubThread?: boolean;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
   readonly autoSettleEnabled: boolean;
@@ -118,6 +121,15 @@ export function buildThreadActionMenuItems(
                 },
               ]
             : []),
+        ]
+      : []),
+    ...(state.isSubThread
+      ? [
+          {
+            id: "move-out-of-parent" as const,
+            label: "Move out of parent",
+            icon: "folder-tree",
+          },
         ]
       : []),
     ...(state.supports.pinning

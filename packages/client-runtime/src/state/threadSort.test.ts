@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   generateSpreadPinOrderKeys,
   getLatestThreadForProject,
+  groupThreadsByWorktree,
   pinOrderKeyBetween,
   planPinnedMove,
   planPinnedReorder,
@@ -497,5 +498,105 @@ describe("sortActiveThreadsByOrderKey", () => {
     const keys = new Map(assignments.map((assignment) => [assignment.id, assignment.orderKey]));
     const updated = threads.map((thread) => ({ ...thread, activeOrderKey: keys.get(thread.id) }));
     expect(sortActiveThreadsByOrderKey(updated).map((thread) => thread.id)).toEqual(orderedIds);
+  });
+});
+
+describe("groupThreadsByWorktree", () => {
+  const thread = (id: string, checkout: { worktreePath?: string; branch?: string }) => ({
+    id,
+    projectId: "project-1",
+    environmentId: "env-1",
+    worktreePath: checkout.worktreePath ?? null,
+    branch: checkout.branch ?? null,
+  });
+
+  it("pulls siblings up to their group's first thread without reordering groups", () => {
+    const groups = groupThreadsByWorktree([
+      thread("a", { worktreePath: "/wt/one", branch: "feat/one" }),
+      thread("b", { branch: "main" }),
+      thread("c", { worktreePath: "/wt/one", branch: "feat/one" }),
+      thread("d", {}),
+      thread("e", { branch: "main" }),
+    ]);
+    expect(groups.map((group) => group.threads.map((member) => member.id))).toEqual([
+      ["a", "c"],
+      ["b", "e"],
+      ["d"],
+    ]);
+  });
+
+  it("stacks a project's groups together in first-thread order", () => {
+    const other = (id: string, branch: string) => ({
+      ...thread(id, { branch }),
+      projectId: "project-2",
+    });
+    const groups = groupThreadsByWorktree([
+      thread("a", { branch: "main" }),
+      other("b", "main"),
+      thread("c", { branch: "feat" }),
+      other("d", "fix"),
+    ]);
+    expect(groups.map((group) => group.threads.map((member) => member.id))).toEqual([
+      ["a"],
+      ["c"],
+      ["b"],
+      ["d"],
+    ]);
+  });
+
+  it("groups a branch together even when recorded worktree paths disagree", () => {
+    const groups = groupThreadsByWorktree([
+      thread("a", { worktreePath: "/wt/one", branch: "feat" }),
+      thread("b", { branch: "feat" }),
+      thread("c", { worktreePath: "/wt/one/", branch: "feat" }),
+      { ...thread("d", { branch: "feat" }), projectId: "project-2" },
+    ]);
+    expect(groups.map((group) => group.threads.map((member) => member.id))).toEqual([
+      ["a", "b", "c"],
+      ["d"],
+    ]);
+  });
+
+  it("merges project records of one repository through the logical project key", () => {
+    // Each worktree registered as its own project; a thread's record need not
+    // match the worktree it runs in.
+    const logical = new Map([
+      ["project-main", "repo"],
+      ["project-loyalty", "repo"],
+      ["project-order", "repo"],
+    ]);
+    const inProject = (id: string, projectId: string, branch: string) => ({
+      ...thread(id, { branch }),
+      projectId,
+    });
+    const groups = groupThreadsByWorktree(
+      [
+        inProject("new", "project-order", "feat/loyalty"),
+        inProject("a", "project-order", "feat/order"),
+        inProject("b", "project-loyalty", "feat/loyalty"),
+      ],
+      (member) => logical.get(member.projectId) ?? member.projectId,
+    );
+    expect(groups.map((group) => group.threads.map((member) => member.id))).toEqual([
+      ["new", "b"],
+      ["a"],
+    ]);
+  });
+
+  it("never merges the same branch across environments", () => {
+    const groups = groupThreadsByWorktree([
+      thread("a", { branch: "main" }),
+      { ...thread("b", { branch: "main" }), environmentId: "env-2" },
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it("keys branchless threads by their worktree", () => {
+    const groups = groupThreadsByWorktree([
+      thread("a", { worktreePath: "/wt/one" }),
+      thread("b", { worktreePath: "/wt/two" }),
+      thread("c", {}),
+    ]);
+    expect(groups).toHaveLength(3);
   });
 });

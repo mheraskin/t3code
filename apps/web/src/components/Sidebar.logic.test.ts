@@ -32,6 +32,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   shouldRecedeSidebarThread,
   sortLogicalProjectsForSidebar,
+  nestSubThreads,
   resolveSidebarDropTarget,
   pinOrderKeyBetween,
   planPinnedReorder,
@@ -1130,6 +1131,23 @@ describe("resolveSidebarDropTarget", () => {
   ];
   const resolve = (activeKey: string, overId: string) =>
     resolveSidebarDropTarget(items, activeKey, overId);
+
+  it("leaves worktree group headers out of the active order", () => {
+    const list: SidebarListItem[] = [
+      marker("pinned-header"),
+      marker("pinned-divider"),
+      { kind: "group", key: "env:project:branch:main" },
+      thread("a1", "active"),
+      { kind: "group", key: "env:project:worktree:/wt/one" },
+      thread("a2", "active"),
+      marker("settled-header"),
+    ];
+    expect(resolveSidebarDropTarget(list, "a2", "sidebar-group-env:project:branch:main")).toEqual({
+      section: "active",
+      pinnedOrder: [],
+      activeOrder: ["a2", "a1"],
+    });
+  });
 
   it("keeps marker-like scoped thread keys draggable", () => {
     const key = "marker:pinned-header";
@@ -2558,4 +2576,33 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+describe("nestSubThreads", () => {
+  const t = (id: string, parentThreadId: string | null = null) => ({ id, parentThreadId });
+  const nest = (groups: Array<{ key: string; threads: ReturnType<typeof t>[] }>) =>
+    nestSubThreads(
+      groups,
+      (thread) => thread.id,
+      (_thread, parentThreadId) => parentThreadId,
+    );
+  const ids = (result: ReturnType<typeof nest>) =>
+    result.groups.map((group) => [group.key, group.threads.map((thread) => thread.id)]);
+
+  it("moves children under their parent across groups and drops emptied groups", () => {
+    const result = nest([
+      { key: "main", threads: [t("a"), t("b")] },
+      { key: "feat", threads: [t("c", "a"), t("d", "a")] },
+    ]);
+    expect(ids(result)).toEqual([["main", ["a", "c", "d", "b"]]]);
+    expect([...result.subThreadKeys]).toEqual(["c", "d"]);
+  });
+
+  it("leaves a thread in place when its parent is absent or itself filed", () => {
+    const result = nest([{ key: "main", threads: [t("a", "missing"), t("b", "c"), t("c", "a")] }]);
+    // c files under a? a is filed under a missing parent, so a stays top level;
+    // c nests under a, and b (under the filed c) keeps its own place.
+    expect(ids(result)).toEqual([["main", ["a", "c", "b"]]]);
+    expect([...result.subThreadKeys]).toEqual(["c"]);
+  });
 });
