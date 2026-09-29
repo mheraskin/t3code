@@ -293,6 +293,35 @@ export function sidebarHoldDropTarget(input: {
   }
 }
 
+/** Where focus goes when the open thread is settled or snoozed: the next
+    thread in its branch group, else the one before it, so work on a branch
+    stays together. A thread outside any group (pinned) or alone in its
+    group falls back to the next thread in the whole list, wrapping. */
+export function resolveThreadAfterPark(input: {
+  readonly orderedKeys: readonly string[];
+  readonly currentKey: string;
+  /** The branch group a row renders in; undefined outside Active. */
+  readonly groupOf: (key: string) => string | undefined;
+  /** False for rows leaving too (settled, snoozed, parked together). */
+  readonly isCandidate: (key: string) => boolean;
+}): string | null {
+  const { orderedKeys, currentKey, groupOf, isCandidate } = input;
+  const index = orderedKeys.indexOf(currentKey);
+  if (index === -1) return null;
+  const group = groupOf(currentKey);
+  if (group !== undefined) {
+    const members = orderedKeys.filter((key) => groupOf(key) === group);
+    const position = members.indexOf(currentKey);
+    const inGroup =
+      members.slice(position + 1).find(isCandidate) ??
+      members.slice(0, position).toReversed().find(isCandidate);
+    if (inGroup !== undefined) return inGroup;
+  }
+  return (
+    [...orderedKeys.slice(index + 1), ...orderedKeys.slice(0, index)].find(isCandidate) ?? null
+  );
+}
+
 export type SidebarThreadDropPlan =
   | { readonly kind: "none" }
   /** Within the pinned block: the existing key writes. */

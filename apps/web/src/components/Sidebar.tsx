@@ -185,6 +185,7 @@ import {
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveSidebarHoldDrop,
+  resolveThreadAfterPark,
   sidebarHoldDropSection,
   sidebarHoldDropTarget,
   type SidebarHoldDrop,
@@ -3046,6 +3047,27 @@ export default function Sidebar() {
   // rendered at click time.
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
   orderedThreadKeysRef.current = orderedThreadKeys;
+  // The branch group each visible Active row renders in. A drop beside a row
+  // in another group would snap back, so only same-group rows take a line,
+  // and parking the open thread moves focus within its group first.
+  const displayGroupByThreadKey = useMemo(
+    () =>
+      new Map(
+        visibleActiveGroups.flatMap((group) =>
+          group.threads.map(
+            (thread) =>
+              [
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                group.key,
+              ] as const,
+          ),
+        ),
+      ),
+    [visibleActiveGroups],
+  );
+  const displayGroupByThreadKeyRef = useRef(displayGroupByThreadKey);
+  displayGroupByThreadKeyRef.current = displayGroupByThreadKey;
+
   const threadByKey = useMemo(
     () =>
       new Map(
@@ -3302,13 +3324,17 @@ export default function Sidebar() {
       const orderedKeys = orderedThreadKeysRef.current;
       const settledKeys = settledThreadKeysRef.current;
       const snoozedKeys = snoozedThreadKeysRef.current;
-      const currentIndex = orderedKeys.indexOf(threadKey);
-      const nextCardKey =
-        currentIndex === -1
-          ? null
-          : ([...orderedKeys.slice(currentIndex + 1), ...orderedKeys.slice(0, currentIndex)].find(
-              (key) => !settledKeys.has(key) && !snoozedKeys.has(key) && !coParkingKeys?.has(key),
-            ) ?? null);
+      const groups = displayGroupByThreadKeyRef.current;
+      const nextCardKey = resolveThreadAfterPark({
+        orderedKeys,
+        currentKey: threadKey,
+        groupOf: (key) => groups.get(key),
+        isCandidate: (key) =>
+          key !== threadKey &&
+          !settledKeys.has(key) &&
+          !snoozedKeys.has(key) &&
+          !coParkingKeys?.has(key),
+      });
       const nextThread = nextCardKey ? threadByKeyRef.current.get(nextCardKey) : null;
       return nextThread
         ? () => navigateToThread(scopeThreadRef(nextThread.environmentId, nextThread.id))
@@ -3775,23 +3801,6 @@ export default function Sidebar() {
         ),
       ),
     [threads],
-  );
-  // The branch group each visible Active row renders in; a drop beside a row
-  // in another group would snap back, so only same-group rows take a line.
-  const displayGroupByThreadKey = useMemo(
-    () =>
-      new Map(
-        visibleActiveGroups.flatMap((group) =>
-          group.threads.map(
-            (thread) =>
-              [
-                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-                group.key,
-              ] as const,
-          ),
-        ),
-      ),
-    [visibleActiveGroups],
   );
   const draggedKeyForHold = dragState?.activeKey ?? null;
   // Shell updates stream in constantly while agents work; the listener reads

@@ -34,6 +34,7 @@ import {
   sortLogicalProjectsForSidebar,
   nestSubThreads,
   resolveSidebarHoldDrop,
+  resolveThreadAfterPark,
   sidebarHoldDropTarget,
   pinOrderKeyBetween,
   planPinnedReorder,
@@ -2488,5 +2489,38 @@ describe("sidebarHoldDropTarget", () => {
   it("is not a section move for filing or an empty drop", () => {
     expect(target({ kind: "nest", key: "a1" })).toBeNull();
     expect(target({ kind: "none" })).toBeNull();
+  });
+});
+
+describe("resolveThreadAfterPark", () => {
+  // Group "feat": a1 a2 a3, then group "main": b1, then pinned p1 (no group).
+  const orderedKeys = ["p1", "a1", "a2", "a3", "b1"];
+  const groups = new Map([
+    ["a1", "feat"],
+    ["a2", "feat"],
+    ["a3", "feat"],
+    ["b1", "main"],
+  ]);
+  const after = (currentKey: string, parked: readonly string[] = []) =>
+    resolveThreadAfterPark({
+      orderedKeys,
+      currentKey,
+      groupOf: (key) => groups.get(key),
+      isCandidate: (key) => key !== currentKey && !parked.includes(key),
+    });
+
+  it("moves to the next thread in the same group", () => {
+    expect(after("a1")).toBe("a2");
+  });
+
+  it("moves back within the group from its last thread", () => {
+    expect(after("a3")).toBe("a2");
+    expect(after("a3", ["a2"])).toBe("a1");
+  });
+
+  it("falls back to the whole list when the group has nothing else", () => {
+    expect(after("b1")).toBe("p1");
+    expect(after("a2", ["a1", "a3"])).toBe("b1");
+    expect(after("p1")).toBe("a1");
   });
 });
