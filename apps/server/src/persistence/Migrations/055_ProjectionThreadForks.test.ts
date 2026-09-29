@@ -1,13 +1,12 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import Migration055 from "./055_ProjectionThreadForks.ts";
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(NodeSqliteClient.layer({ filename: ":memory:" }));
 
 layer("055_ProjectionThreadForks", (it) => {
   it.effect("adds fork lineage and side-chat columns", () =>

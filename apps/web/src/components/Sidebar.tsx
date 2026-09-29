@@ -41,7 +41,8 @@ import {
   type EnvironmentMachineKind,
   type ProjectIconOverride,
   type ScopedThreadRef,
-  type ThreadId,
+  ThreadId,
+  threadProviderInstanceId,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
@@ -82,7 +83,6 @@ import {
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
-import { useRightPanelStore } from "../rightPanelStore";
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -123,6 +123,7 @@ import {
   useThreadSelectionStore,
 } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
+import { useThreadForkActions } from "../hooks/useThreadFork";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -132,6 +133,8 @@ import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
+  readSideChatsByParent,
+  readThreadDetail,
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
   useProjects,
@@ -149,11 +152,17 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
+import {
+  completedTurnIdsFromCheckpoints,
+  resolveForkEntryAvailability,
+} from "../threadForking.logic";
 import type { SidebarThreadSummary } from "../types";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
+
+import { useRightPanelStore } from "../rightPanelStore";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animateSidebarLayoutChanges,
@@ -2198,6 +2207,7 @@ export default function Sidebar() {
     archiveThread,
     deleteThread,
   } = useThreadActions();
+  const threadFork = useThreadForkActions(null);
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -4071,6 +4081,22 @@ export default function Sidebar() {
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
+        const providerInstanceId = threadProviderInstanceId(thread);
+        const forkCapability = serverConfigs
+          .get(thread.environmentId)
+          ?.providers.find((provider) => provider.instanceId === providerInstanceId)?.sessionFork;
+        const threadDetail = readThreadDetail(threadRef);
+        const forkEntry = resolveForkEntryAvailability({
+          capability: forkCapability,
+          latestTurn: thread.latestTurn,
+          ...(threadDetail
+            ? {
+                messages: threadDetail.messages,
+                completedTurnIds: completedTurnIdsFromCheckpoints(threadDetail.checkpoints),
+              }
+            : {}),
+        });
+        const sideChats = readSideChatsByParent(threadRef);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         const threadProjectGroup =
@@ -4106,6 +4132,11 @@ export default function Sidebar() {
                 pinning: supportsPinning,
                 titleRegeneration: supportsTitleRegeneration,
               },
+              forking: {
+                enabled: forkEntry.enabled,
+                disabledReason: forkEntry.disabledReason,
+                sideChats,
+              },
               snoozePresets,
             }),
             position,
@@ -4118,6 +4149,21 @@ export default function Sidebar() {
               ? await requestCustomSnooze()
               : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
           if (preset) attemptSnooze(threadRef, preset);
+          return;
+        }
+        if (clicked.value?.startsWith("open-existing-side-chat:")) {
+          if (routeThreadKeyRef.current !== threadKey) {
+            await router.navigate({
+              to: "/$environmentId/$threadId",
+              params: buildThreadRouteParams(threadRef),
+            });
+          }
+          useRightPanelStore
+            .getState()
+            .openSideChat(
+              threadRef,
+              ThreadId.make(clicked.value.slice("open-existing-side-chat:".length)),
+            );
           return;
         }
         switch (clicked.value) {
@@ -4158,6 +4204,16 @@ export default function Sidebar() {
             }
             return;
           }
+          case "open-side-chat":
+            if (forkEntry.target) {
+              void threadFork.forkTarget(thread, forkEntry.target, true);
+            }
+            return;
+          case "fork-thread":
+            if (forkEntry.target) {
+              void threadFork.forkTarget(thread, forkEntry.target, false);
+            }
+            return;
           case "settle":
             attemptSettle(threadRef);
             return;
@@ -4315,10 +4371,12 @@ export default function Sidebar() {
       openProjectSettings,
       projectScopeKey,
       projectByKey,
+      router,
       serverConfigs,
       setProjectScopeKey,
       setThreadAutoSettle,
       startThreadRename,
+      threadFork,
       updateThreadMetadata,
       timestampFormat,
     ],

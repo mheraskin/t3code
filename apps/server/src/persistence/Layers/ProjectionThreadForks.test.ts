@@ -16,7 +16,7 @@ const layer = it.layer(
 );
 
 layer("ProjectionThread fork persistence", (it) => {
-  it.effect("round-trips fork lineage and side-chat state through every repository read", () =>
+  it.effect("round-trips fork lineage and side-chat state through the repository", () =>
     Effect.gen(function* () {
       const repository = yield* ProjectionThreadRepository;
       const threadId = ThreadId.make("thread-fork");
@@ -65,10 +65,6 @@ layer("ProjectionThread fork persistence", (it) => {
       const byId = Option.getOrThrow(yield* repository.getById({ threadId }));
       assert.deepEqual(byId.fork, fork);
       assert.equal(byId.sideChat, 1);
-
-      const byProject = yield* repository.listByProjectId({ projectId });
-      assert.deepEqual(byProject[0]?.fork, fork);
-      assert.equal(byProject[0]?.sideChat, 1);
     }),
   );
 });

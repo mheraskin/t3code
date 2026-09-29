@@ -18,6 +18,7 @@ import * as Order from "effect/Order";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
+import { visibleTopLevelThreads } from "../threads/sideChats.logic";
 
 export type HomeProjectSortOrder = Exclude<SidebarProjectSortOrder, "manual">;
 
@@ -71,6 +72,7 @@ export function sortHomeProjectScopes(input: {
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly projectSortOrder: HomeProjectSortOrder;
 }): ReadonlyArray<HomeProjectScope> {
+  const knownThreadIds = new Set(input.threads.map((thread) => thread.id));
   const scopeKeyByProjectRef = new Map(
     input.scopes.flatMap((scope) =>
       scope.projectRefs.map(
@@ -88,7 +90,7 @@ export function sortHomeProjectScopes(input: {
     );
   };
 
-  for (const thread of input.threads) {
+  for (const thread of visibleTopLevelThreads(input.threads, knownThreadIds)) {
     if (thread.archivedAt !== null) continue;
     recordActivity(
       scopeKeyByProjectRef.get(scopedProjectKey(thread.environmentId, thread.projectId)),

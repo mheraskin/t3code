@@ -1,3 +1,4 @@
+import type { ScreenHeaderMenu, ScreenHeaderMenuItem } from "../../components/ScreenHeader.types";
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { useMemo } from "react";
 import type { AppNativeStackNavigationOptions } from "../../native/StackHeader";
@@ -11,7 +12,21 @@ import {
 
 type NativeHeaderItems = ReadonlyArray<Record<string, unknown>>;
 
+function nativeThreadMenuItems(items: ReadonlyArray<ScreenHeaderMenuItem>): NativeHeaderItems {
+  return items.map((item) =>
+    "items" in item
+      ? { type: "submenu", label: item.title, items: nativeThreadMenuItems(item.items) }
+      : {
+          type: "action",
+          label: item.title,
+          onPress: item.onPress,
+          ...(item.icon ? { icon: { type: "sfSymbol", name: item.icon } } : {}),
+        },
+  );
+}
+
 export function useThreadHeaderOptions(props: {
+  readonly threadMenu?: ScreenHeaderMenu | null;
   readonly title: string;
   readonly subtitle: string;
   readonly headerColor: string;
@@ -81,6 +96,23 @@ export function useThreadHeaderOptions(props: {
     [navigation],
   );
 
+  const threadHeaderMenu = useMemo(
+    () =>
+      props.threadMenu
+        ? withNativeGlassHeaderItem({
+            type: "menu",
+            label: "",
+            accessibilityLabel: "Thread actions",
+            icon: { type: "sfSymbol", name: "ellipsis" },
+            identifier: "thread-right-actions",
+            menu: {
+              title: props.threadMenu.title,
+              items: nativeThreadMenuItems(props.threadMenu.items),
+            },
+          })
+        : null,
+    [props.threadMenu],
+  );
   const options: AppNativeStackNavigationOptions = {
     headerShown: true,
     headerTitle: props.title,
@@ -103,8 +135,10 @@ export function useThreadHeaderOptions(props: {
     // Search lives in the persistent sidebar, so the split header keeps
     // the git controls on the RIGHT (no center items — center space is
     // reserved for future breadcrumbs/status).
-    unstable_headerRightItems: () =>
-      layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems,
+    unstable_headerRightItems: () => [
+      ...(threadHeaderMenu ? [threadHeaderMenu] : []),
+      ...(layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems),
+    ],
     unstable_headerSubtitle: props.usesNativeHeaderGlass ? props.subtitle : undefined,
     contentStyle: undefined,
   };

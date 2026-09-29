@@ -7,7 +7,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 
@@ -41,6 +41,21 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import type { ThreadForkTarget } from "../threadForking.logic";
+
+export interface ThreadActionMenuForkEntry {
+  readonly enabled: boolean;
+  readonly disabledReason: string | null;
+  readonly sideChats: ReadonlyArray<{ readonly id: string; readonly title: string }>;
+  readonly source: { readonly environmentId: EnvironmentId; readonly id: ThreadId };
+  readonly target: ThreadForkTarget | null;
+  readonly onForkTarget: (
+    source: { readonly environmentId: EnvironmentId; readonly id: ThreadId },
+    target: ThreadForkTarget,
+    sideChat: boolean,
+  ) => Promise<boolean>;
+  readonly onOpenExistingSideChat: (threadId: ThreadId) => void;
+}
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -67,8 +82,9 @@ export function useThreadActionMenu(input: {
   /** Fallback for "Copy path" when the thread has no worktree. */
   readonly projectCwd: string | null;
   readonly onStartRename: () => void;
+  readonly forkEntry?: ThreadActionMenuForkEntry;
 }) {
-  const { threadRef, projectCwd, onStartRename } = input;
+  const { threadRef, projectCwd, onStartRename, forkEntry } = input;
   const router = useRouter();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -131,6 +147,14 @@ export function useThreadActionMenu(input: {
         // what the user is looking at.
         const thread = readThreadShell(threadRef);
         if (!thread) return;
+        const forkAction =
+          forkEntry?.target == null
+            ? null
+            : {
+                source: forkEntry.source,
+                target: forkEntry.target,
+                run: forkEntry.onForkTarget,
+              };
         const now = new Date();
         const supports = {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
@@ -154,6 +178,15 @@ export function useThreadActionMenu(input: {
           isRegeneratingTitle,
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           supports,
+          ...(forkEntry
+            ? {
+                forking: {
+                  enabled: forkEntry.enabled,
+                  disabledReason: forkEntry.disabledReason,
+                  sideChats: forkEntry.sideChats,
+                },
+              }
+            : {}),
           snoozePresets,
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
@@ -169,6 +202,12 @@ export function useThreadActionMenu(input: {
           if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
             failureToast("Failed to snooze thread", squashAtomCommandFailure(result));
           }
+          return;
+        }
+        if (action.startsWith("open-existing-side-chat:")) {
+          forkEntry?.onOpenExistingSideChat(
+            action.slice("open-existing-side-chat:".length) as ThreadId,
+          );
           return;
         }
         const reportFailure = async (
@@ -213,6 +252,16 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
+          case "open-side-chat":
+            if (forkAction) {
+              void forkAction.run(forkAction.source, forkAction.target, true);
+            }
+            return;
+          case "fork-thread":
+            if (forkAction) {
+              void forkAction.run(forkAction.source, forkAction.target, false);
+            }
+            return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;
@@ -334,6 +383,7 @@ export function useThreadActionMenu(input: {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      forkEntry,
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,

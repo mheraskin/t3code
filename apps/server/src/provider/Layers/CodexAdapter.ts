@@ -1,9 +1,3 @@
-export const codexAdapterCapabilities = {
-      sessionModelSwitch: "in-session",
-      sessionFork: "any-turn",
-      promptlessTurnContinuation: true,
-    } as const;
-
 /**
  * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
  *
@@ -90,6 +84,12 @@ const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
   CodexSessionRuntimeThreadIdMissingError,
 );
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
+
+export const codexAdapterCapabilities = {
+  sessionModelSwitch: "in-session",
+  sessionFork: "any-turn",
+  promptlessTurnContinuation: true,
+} as const;
 
 const PROVIDER = ProviderDriverKind.make("codex");
 

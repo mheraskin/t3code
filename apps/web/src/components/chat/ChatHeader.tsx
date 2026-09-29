@@ -11,7 +11,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronDownIcon, EllipsisIcon } from "lucide-react";
+import { ArrowUpRightIcon, ChevronDownIcon, EllipsisIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -36,7 +36,7 @@ import { OpenInPicker } from "./OpenInPicker";
 import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
-import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
+import { type ThreadActionMenuForkEntry, useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -68,6 +68,9 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
+  presentation?: "page" | "side-chat";
+  forkEntry?: ThreadActionMenuForkEntry | undefined;
+  onPromoteSideChat?: (() => void) | undefined;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
@@ -137,6 +140,9 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  presentation = "page",
+  forkEntry,
+  onPromoteSideChat,
   onOpenPullRequest,
   onNewThreadInProject,
   onOpenProjectSettings,
@@ -257,6 +263,7 @@ export const ChatHeader = memo(function ChatHeader({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
     onStartRename: startRename,
+    ...(forkEntry ? { forkEntry } : {}),
   });
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
   const titleMenuTimerRef = useRef<number | null>(null);
@@ -494,34 +501,42 @@ export const ChatHeader = memo(function ChatHeader({
           "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
           // Reserve two panel toggles plus their 4px gaps and 1px edge inset.
           // The page header adds 8px more right padding at sm.
-          rightPanelOpen ? "pr-0" : "pr-18.25 sm:pr-14.25",
+          presentation === "side-chat" || rightPanelOpen ? "pr-0" : "pr-18.25 sm:pr-14.25",
           "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
         )}
       >
-        <Menu open={actionsCollapsed && actionsOpen} onOpenChange={setActionsOpen}>
-          <MenuTrigger
-            className={
-              actionsCollapsed &&
-              (activeProjectScripts || showOpenInPicker || (activeProjectName && gitCwd))
-                ? undefined
-                : "hidden"
-            }
-            render={<Button size="icon-sm" variant="ghost" aria-label="More header actions" />}
-          >
-            <EllipsisIcon className="size-4" />
-          </MenuTrigger>
-          <div ref={mountInlineActions} className="contents" />
-          <MenuPopup
-            data-chat-header-actions
-            keepMounted
-            aria-label="Header actions"
-            align="end"
-            finalFocus={actionsCollapsed ? undefined : false}
-          >
-            <div ref={mountMenuActions} className="contents" />
-            {createPortal(headerActions, actionsContainer)}
-          </MenuPopup>
-        </Menu>
+        {presentation === "side-chat" && onPromoteSideChat ? (
+          <Button type="button" size="xs" variant="ghost" onClick={onPromoteSideChat}>
+            <ArrowUpRightIcon className="size-3.5" aria-hidden="true" />
+            Promote to thread
+          </Button>
+        ) : null}
+        {presentation === "page" && (
+          <Menu open={actionsCollapsed && actionsOpen} onOpenChange={setActionsOpen}>
+            <MenuTrigger
+              className={
+                actionsCollapsed &&
+                (activeProjectScripts || showOpenInPicker || (activeProjectName && gitCwd))
+                  ? undefined
+                  : "hidden"
+              }
+              render={<Button size="icon-sm" variant="ghost" aria-label="More header actions" />}
+            >
+              <EllipsisIcon className="size-4" />
+            </MenuTrigger>
+            <div ref={mountInlineActions} className="contents" />
+            <MenuPopup
+              data-chat-header-actions
+              keepMounted
+              aria-label="Header actions"
+              align="end"
+              finalFocus={actionsCollapsed ? undefined : false}
+            >
+              <div ref={mountMenuActions} className="contents" />
+              {createPortal(headerActions, actionsContainer)}
+            </MenuPopup>
+          </Menu>
+        )}
       </div>
     </div>
   );

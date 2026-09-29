@@ -626,6 +626,8 @@ const makeWsRpcLayer = (
         | Path.Path
         | ServerConfig.ServerConfig
         | WorkspacePaths.WorkspacePaths
+        | ProjectionSnapshotQuery.ProjectionSnapshotQuery
+        | ProviderService.ProviderService
       >();
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -2993,7 +2995,12 @@ const makeWsRpcLayer = (
                   });
                   yield* dispatchNormalizedCommand(normalizedCommand);
                   yield* recordClientCommandAnalytics(normalizedCommand);
-                }).pipe(Effect.provideContext(normalizerContext)),
+                }).pipe(
+                  Effect.provideContext(normalizerContext),
+                  Effect.mapError((cause) =>
+                    toDispatchCommandError(cause, "Failed to create cloned project."),
+                  ),
+                ),
               onCloned: (project) =>
                 // The project was created against an empty directory, so its
                 // cached identity is "not a repository" until this refresh.

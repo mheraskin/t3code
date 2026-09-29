@@ -11,6 +11,7 @@ import type {
   PreviewSessionSnapshot,
   ProjectId,
   PullRequestState,
+  ThreadId,
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
@@ -22,6 +23,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessageSquare,
   Plus,
   TerminalSquare,
   Volume2,
@@ -102,6 +104,7 @@ interface RightPanelTabsProps {
    */
   previewRuntimeTabId?: ((tabId: string) => string) | undefined;
   terminalLabelsById: ReadonlyMap<string, string>;
+  sideChatTitlesById?: ReadonlyMap<ThreadId, string>;
   onActivate: (surface: RightPanelSurface) => void;
   onRenameDevice?: (surfaceId: string, title: string) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
@@ -609,6 +612,7 @@ function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  sideChatTitlesById: ReadonlyMap<ThreadId, string> | undefined,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -632,6 +636,9 @@ function surfaceTitle(
       return "Agents";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
+
+    case "side-chat":
+      return sideChatTitlesById?.get(surface.threadId) ?? "Side chat";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -723,6 +730,9 @@ function SurfaceIcon({
       ) : (
         <Smartphone className="size-3 shrink-0" />
       );
+
+    case "side-chat":
+      return <MessageSquare className="size-3 shrink-0" />;
   }
 }
 
@@ -1131,7 +1141,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
-              const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const title = surfaceTitle(
+                surface,
+                props.previewSessions,
+                props.terminalLabelsById,
+                props.sideChatTitlesById,
+              );
               const previewTabId = previewTabIdOf(surface, props.previewSessions);
               // Desktop state is keyed by the session id, but desktop actions
               // must be addressed with the runtime id.

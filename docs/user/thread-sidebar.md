@@ -25,6 +25,12 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Side chats
+
+Side chats do not appear in the thread list while their parent thread exists; reopen them from the
+parent thread's **Side chats** menu. Deleting the parent returns its side chats to the thread list.
+See [Side chats and forks](./side-chats-and-forks.md).
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

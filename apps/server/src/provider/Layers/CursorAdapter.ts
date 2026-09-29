@@ -1,5 +1,3 @@
-export const cursorAdapterCapabilities = { sessionModelSwitch: "in-session", supportsConversationRollback: false, sessionFork: "unsupported" } as const;
-
 /**
  * CursorAdapterLive — Cursor CLI (`agent acp`) via ACP.
  *
@@ -87,6 +85,12 @@ import {
   rewriteCursorSkillMentions,
 } from "../Drivers/CursorSkills.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
+
+export const cursorAdapterCapabilities = {
+  sessionModelSwitch: "in-session",
+  supportsConversationRollback: false,
+  sessionFork: "unsupported",
+} as const;
 
 const PROVIDER = ProviderDriverKind.make("cursor");
 const CURSOR_RESUME_VERSION = 1 as const;
