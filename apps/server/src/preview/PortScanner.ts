@@ -5,6 +5,10 @@
  * stable line-prefixed field format; this is the only `lsof` flag set we rely
  * on).
  *
+ * Linux also merges `ss -Hltn`: an unprivileged `lsof` cannot see sockets owned
+ * by other users, which hides root-owned listeners such as Docker's
+ * `docker-proxy` published ports.
+ *
  * Windows / lsof missing: checks a curated list of common dev ports through
  * the shared Net service.
  *
@@ -239,6 +243,37 @@ const parsePortFromLsofName = (name: string): number | null => {
   return port;
 };
 
+const parseSsOutput = (raw: string): ReadonlyArray<DiscoveredLocalServer> => {
+  const seen = new Map<number, DiscoveredLocalServer>();
+  for (const line of raw.split("\n")) {
+    // `ss -Hltn` columns: State Recv-Q Send-Q Local:Port Peer:Port
+    const localAddress = line.trim().split(/\s+/)[3];
+    const port = localAddress ? parsePortFromLsofName(localAddress) : null;
+    if (port === null || seen.has(port)) continue;
+    seen.set(port, {
+      host: "localhost",
+      port,
+      url: `http://localhost:${port}`,
+      processName: null,
+      pid: null,
+      terminal: null,
+    });
+  }
+  return [...seen.values()].toSorted((left, right) => left.port - right.port);
+};
+
+/** Adds ports only `ss` can see; `lsof` entries win because they carry process details. */
+const mergeSsListeners = (
+  lsofListeners: ReadonlyArray<DiscoveredLocalServer>,
+  ssListeners: ReadonlyArray<DiscoveredLocalServer>,
+): ReadonlyArray<DiscoveredLocalServer> => {
+  const lsofPorts = new Set(lsofListeners.map((server) => server.port));
+  return [
+    ...lsofListeners,
+    ...ssListeners.filter((server) => !lsofPorts.has(server.port)),
+  ].toSorted((left, right) => left.port - right.port);
+};
+
 const parseWindowsListenerOutput = (
   raw: string,
   terminalByProcessId: ReadonlyMap<number, TerminalProcessOwner> = new Map(),
@@ -471,7 +506,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   });
 
   const recoverProcessProbeFailure =
-    (probe: "lsof" | "windows-listeners") => (error: ProcessRunner.ProcessRunError) =>
+    (probe: "lsof" | "ss" | "windows-listeners") => (error: ProcessRunner.ProcessRunError) =>
       Effect.logDebug("preview port process probe failed; falling back to common-port probes", {
         cause: error,
         probe,
@@ -514,7 +549,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
     }
     const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
-    const lsofResult = yield* processRunner
+    const lsofProbe = processRunner
       .run({
         command: "lsof",
         args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
@@ -532,7 +567,38 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           ProcessTimeoutError: recoverLsofProbeFailure,
         }),
       );
-    if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
+    const recoverSsProbeFailure = recoverProcessProbeFailure("ss");
+    const ssProbe =
+      hostPlatform === "linux"
+        ? processRunner
+            .run({
+              command: "ss",
+              args: ["-Hltn"],
+              timeout: Duration.millis(LSOF_TIMEOUT_MS),
+              maxOutputBytes: 1024 * 1024,
+              outputMode: "truncate",
+            })
+            .pipe(
+              Effect.map((result) => parseSsOutput(result.stdout)),
+              Effect.catchTags({
+                ProcessSpawnError: recoverSsProbeFailure,
+                ProcessStdinError: recoverSsProbeFailure,
+                ProcessOutputLimitError: recoverSsProbeFailure,
+                ProcessReadError: recoverSsProbeFailure,
+                ProcessTimeoutError: recoverSsProbeFailure,
+              }),
+            )
+        : Effect.succeed(null);
+    const [lsofResult, ssResult] = yield* Effect.all([lsofProbe, ssProbe], {
+      concurrency: "unbounded",
+    });
+    const listeners =
+      lsofResult === null
+        ? ssResult
+        : ssResult === null
+          ? lsofResult
+          : mergeSsListeners(lsofResult, ssResult);
+    if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
     return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
   });
 
