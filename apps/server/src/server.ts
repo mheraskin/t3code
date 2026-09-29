@@ -76,6 +76,7 @@ import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
+import * as PreviewGateway from "./preview/Gateway.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -422,6 +423,7 @@ const TerminalLayerLive = TerminalManager.layer.pipe(
 
 const PreviewLayerLive = Layer.empty.pipe(
   Layer.provideMerge(PreviewManager.layer),
+  Layer.provideMerge(PreviewGateway.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(PortScannerLayerLive),
 );
 

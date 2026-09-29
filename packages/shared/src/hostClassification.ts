@@ -106,6 +106,16 @@ export const isPrivateNetworkHost = (host: string): boolean => {
   );
 };
 
+/** Tailscale addresses: MagicDNS names, 100.64.0.0/10, and fd7a:115c:a1e0::/48. */
+export const isTailscaleHost = (host: string): boolean => {
+  const normalized = normalizeHostname(host);
+  if (normalized.endsWith(".ts.net")) return true;
+  const ipv4 = parseIpv4Address(normalized);
+  if (ipv4) return ipv4[0] === 100 && ipv4[1]! >= 64 && ipv4[1]! <= 127;
+  const ipv6 = parseIpv6Address(normalized);
+  return ipv6 !== null && ipv6PrefixMatches(ipv6, [0xfd7a, 0x115c, 0xa1e0, 0, 0, 0, 0, 0], 48);
+};
+
 /** Whether a hostname is eligible to be disclosed to a public favicon provider. */
 export const isPublicFaviconHost = (host: string): boolean => {
   // A single trailing dot is a valid absolute DNS name. Repeated trailing

@@ -9,6 +9,7 @@ import {
 } from "~/browser/browserDefaults";
 import { isWebUrl, resolveBrowserLinkTargetPreference } from "~/browser/browserLinkTarget";
 import type { OpenPreviewMutation } from "~/browser/openFileInPreview";
+import { resolvePreviewGatewayUrl, type OpenPreviewGateway } from "~/browser/previewGateway";
 import { recordVisitForThread } from "~/browserHistoryStore";
 import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -29,10 +30,11 @@ export class TerminalLinkPreviewOpenError extends Schema.TaggedError<TerminalLin
   }
 }
 
-interface OpenTerminalLinkInPreviewInput<E> {
+interface OpenTerminalLinkInPreviewInput<E, GE> {
   readonly url: string;
   readonly threadRef: ScopedThreadRef;
   readonly openPreview: OpenPreviewMutation<E>;
+  readonly openGateway: OpenPreviewGateway<GE>;
   readonly fallbackToBrowser: () => void;
   /** Cmd/Ctrl-click bypasses the preference and opens in the system browser. */
   readonly forceBrowser: boolean;
@@ -42,8 +44,8 @@ interface OpenTerminalLinkInPreviewInput<E> {
  * Opens a terminal hyperlink where the "Open links in" setting says, unless a
  * Cmd/Ctrl-click explicitly requests the system browser.
  */
-export async function openTerminalLinkInPreview<E>(
-  input: OpenTerminalLinkInPreviewInput<E>,
+export async function openTerminalLinkInPreview<E, GE>(
+  input: OpenTerminalLinkInPreviewInput<E, GE>,
 ): Promise<void> {
   const supportsPreview =
     !input.forceBrowser &&
@@ -64,11 +66,15 @@ export async function openTerminalLinkInPreview<E>(
   };
 
   const defaults = await resolveBrowserDefaults();
+  // Terminal output names the environment's own loopback ports.
+  const url =
+    (await resolvePreviewGatewayUrl(input.threadRef.environmentId, input.url, input.openGateway)) ??
+    input.url;
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
     input: {
       threadId: input.threadRef.threadId,
-      url: input.url,
+      url,
       // Same reason as `openUrlInPreview`: this path handles its own result
       // mapping, so the configured defaults are applied explicitly.
       viewport: browserDefaultOpenViewport(defaults),

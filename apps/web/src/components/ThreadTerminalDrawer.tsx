@@ -364,6 +364,7 @@ export function TerminalViewport({
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
+  const openGateway = useAtomCommand(previewEnvironment.openGateway, { reportFailure: false });
   const runTerminalWrite = useAtomCommand(terminalEnvironment.write, {
     reportFailure: false,
   });
@@ -801,6 +802,7 @@ export function TerminalViewport({
             url: text,
             threadRef,
             openPreview,
+            openGateway,
             fallbackToBrowser,
             forceBrowser: event.metaKey || event.ctrlKey,
           }).catch((error: unknown) => {

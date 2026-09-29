@@ -13,6 +13,16 @@ vi.mock("~/previewStateStore", () => ({
   isPreviewSupportedInRuntime: () => true,
 }));
 
+const gatewayMocks = vi.hoisted(() => ({
+  resolve: vi.fn<() => Promise<string | null>>(async () => null),
+}));
+
+vi.mock("~/browser/previewGateway", () => ({
+  resolvePreviewGatewayUrl: gatewayMocks.resolve,
+}));
+
+const openGateway = vi.fn();
+
 vi.mock("~/rightPanelStore", () => ({
   useRightPanelStore: {
     getState: () => ({ openBrowser: vi.fn() }),
@@ -58,6 +68,8 @@ const snapshot: PreviewSessionSnapshot = {
 };
 
 beforeEach(() => {
+  gatewayMocks.resolve.mockReset();
+  gatewayMocks.resolve.mockResolvedValue(null);
   browserDefaultsMocks.resolve.mockReset();
   browserDefaultsMocks.resolve.mockResolvedValue(hydratedDefaults);
   linkTargetMocks.preference.mockReturnValue("app");
@@ -87,6 +99,7 @@ describe("openTerminalLinkInPreview", () => {
           url: "https://example.com/docs",
           threadRef,
           openPreview,
+          openGateway,
           fallbackToBrowser,
           forceBrowser: false,
         }),
@@ -105,6 +118,7 @@ describe("openTerminalLinkInPreview", () => {
       url: "http://localhost:3000/",
       threadRef,
       openPreview,
+      openGateway,
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -121,6 +135,7 @@ describe("openTerminalLinkInPreview", () => {
       url: "https://example.com/docs",
       threadRef,
       openPreview,
+      openGateway,
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -143,6 +158,7 @@ describe("openTerminalLinkInPreview", () => {
       url: "http://localhost:3000/",
       threadRef,
       openPreview,
+      openGateway,
       fallbackToBrowser: vi.fn(),
       forceBrowser: false,
     });
@@ -173,6 +189,7 @@ describe("openTerminalLinkInPreview", () => {
       url: "http://127.0.0.1:5173/",
       threadRef,
       openPreview: async () => AsyncResult.failure(cause),
+      openGateway,
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -198,6 +215,7 @@ describe("openTerminalLinkInPreview", () => {
       url: "http://localhost:5173/",
       threadRef,
       openPreview: async () => AsyncResult.failure(Cause.interrupt()),
+      openGateway,
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -214,11 +232,34 @@ describe("openTerminalLinkInPreview", () => {
       url: "https://example.com/docs",
       threadRef,
       openPreview,
+      openGateway,
       fallbackToBrowser,
       forceBrowser: true,
     });
 
     expect(fallbackToBrowser).toHaveBeenCalledOnce();
     expect(openPreview).not.toHaveBeenCalled();
+  });
+
+  it("opens loopback links through the preview gateway when it applies", async () => {
+    gatewayMocks.resolve.mockResolvedValue("http://100.99.182.95:8971/?t3PreviewGatewayToken=t");
+    const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+
+    await openTerminalLinkInPreview({
+      url: "http://localhost:8971/",
+      threadRef,
+      openPreview,
+      openGateway,
+      fallbackToBrowser: vi.fn(),
+      forceBrowser: false,
+    });
+
+    expect(openPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          url: "http://100.99.182.95:8971/?t3PreviewGatewayToken=t",
+        }),
+      }),
+    );
   });
 });

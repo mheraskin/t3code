@@ -31,6 +31,7 @@ import {
   useThreadPreviewState,
 } from "~/previewStateStore";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
+import { resolvePreviewGatewayUrl } from "~/browser/previewGateway";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -128,6 +129,7 @@ export function PreviewView({
     ? new URL(environmentHttpBaseUrl).hostname
     : null;
   const open = useAtomCommand(previewEnvironment.open);
+  const openGateway = useAtomCommand(previewEnvironment.openGateway, { reportFailure: false });
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
 
   usePreviewSession(threadRef);
@@ -213,20 +215,27 @@ export function PreviewView({
     async (next: string) => {
       try {
         const normalized = normalizePreviewUrl(next);
-        if (await navigateToResolvedUrl(normalized)) {
+        const gatewayUrl = await resolvePreviewGatewayUrl(
+          threadRef.environmentId,
+          normalized,
+          openGateway,
+        );
+        if (await navigateToResolvedUrl(gatewayUrl ?? normalized)) {
           recordVisitForThread(threadRef, normalized);
         }
       } catch {
         // Server-side `failed` event renders the unreachable view.
       }
     },
-    [navigateToResolvedUrl, threadRef],
+    [navigateToResolvedUrl, openGateway, threadRef],
   );
 
   const handleOpenServerUrl = useCallback(
     async (next: string) => {
       try {
-        const resolved = resolveDiscoveredServerUrl(threadRef.environmentId, next);
+        const resolved =
+          (await resolvePreviewGatewayUrl(threadRef.environmentId, next, openGateway)) ??
+          resolveDiscoveredServerUrl(threadRef.environmentId, next);
         if (await navigateToResolvedUrl(resolved)) {
           recordVisitForThread(threadRef, next);
         }
@@ -234,7 +243,7 @@ export function PreviewView({
         // Server-side `failed` event renders the unreachable view.
       }
     },
-    [navigateToResolvedUrl, threadRef],
+    [navigateToResolvedUrl, openGateway, threadRef],
   );
 
   const handleRefresh = useCallback(() => {

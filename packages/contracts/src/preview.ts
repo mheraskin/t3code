@@ -352,3 +352,37 @@ export class PreviewInvalidUrlError extends Schema.TaggedError<PreviewInvalidUrl
 
 export const PreviewError = Schema.Union([PreviewSessionLookupError, PreviewInvalidUrlError]);
 export type PreviewError = typeof PreviewError.Type;
+
+/**
+ * Query parameter carrying a preview gateway token on the first request. The
+ * gateway trades it for a port-scoped cookie and redirects without it.
+ */
+export const PREVIEW_GATEWAY_TOKEN_QUERY_PARAM = "t3PreviewGatewayToken";
+
+/** Opens the Tailscale preview gateway for a discovered loopback port. */
+export const PreviewOpenGatewayInput = Schema.Struct({
+  port: Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThan(65536)),
+});
+export type PreviewOpenGatewayInput = typeof PreviewOpenGatewayInput.Type;
+
+export const PreviewOpenGatewayResult = Schema.Struct({
+  token: TrimmedNonEmptyString,
+});
+export type PreviewOpenGatewayResult = typeof PreviewOpenGatewayResult.Type;
+
+export class PreviewGatewayUnavailableError extends Schema.TaggedError<PreviewGatewayUnavailableError>()(
+  "PreviewGatewayUnavailableError",
+  {
+    port: Schema.Number,
+    reason: Schema.Literals([
+      "not-discovered",
+      "no-tailscale-address",
+      "port-in-use",
+      "unexpected",
+    ]),
+  },
+) {
+  override get message() {
+    return `The preview gateway cannot serve port ${this.port} (${this.reason}).`;
+  }
+}

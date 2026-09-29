@@ -38,6 +38,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "~/previewMiniPlayerStore";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
+import { navigationTargetUrl, resolvePreviewGatewayUrl } from "~/browser/previewGateway";
 import {
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
@@ -339,6 +340,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   const open = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
+  const openGateway = useAtomCommand(previewEnvironment.openGateway, { reportFailure: false });
   const resize = useAtomCommand(previewEnvironment.resize, {
     reportFailure: false,
   });
@@ -435,10 +437,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           case "open": {
             const input = request.input as PreviewAutomationOpenInput;
             const resolvedInputUrl = input.url
-              ? resolveBrowserNavigationTarget(environmentId, {
+              ? ((await resolvePreviewGatewayUrl(environmentId, input.url, openGateway)) ??
+                resolveBrowserNavigationTarget(environmentId, {
                   kind: "url",
                   url: input.url,
-                }).resolvedUrl
+                }).resolvedUrl)
               : undefined;
             let activeTabId = resolvePreviewAutomationOpenTab(
               state,
@@ -572,14 +575,14 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           case "navigate": {
             const ready = await requireReadyTab();
             const input = request.input as PreviewAutomationNavigateInput;
-            const resolution = resolveBrowserNavigationTarget(
-              environmentId,
-              input.target ?? {
-                kind: "url",
-                url: input.url!,
-              },
-            );
-            await ready.bridge.navigate(ready.runtimeTabId, resolution.resolvedUrl);
+            const target = input.target ?? { kind: "url" as const, url: input.url! };
+            const resolvedUrl =
+              (await resolvePreviewGatewayUrl(
+                environmentId,
+                navigationTargetUrl(target),
+                openGateway,
+              )) ?? resolveBrowserNavigationTarget(environmentId, target).resolvedUrl;
+            await ready.bridge.navigate(ready.runtimeTabId, resolvedUrl);
             await waitForNavigationReadiness(
               threadRef,
               request.requestId,
@@ -794,7 +797,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         browserActivity.release?.();
       }
     },
-    [environmentId, listPreviews, open, registry, resize],
+    [environmentId, listPreviews, open, openGateway, registry, resize],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
   const setRequestHandler = useAtomSet(requestHandlerAtom);
