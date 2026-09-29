@@ -118,6 +118,18 @@ For a plain HTTP LAN endpoint, use the direct pairing URL in a browser that can
 open it, or pair from the desktop app. On mobile, an IP address entered without a
 scheme uses HTTP, so include `https://` when your server uses HTTPS.
 
+### Preview dev servers over Tailscale
+
+When the desktop app connects to an environment by its Tailscale address or MagicDNS
+name, dev servers on that host open in the browser panel even if they listen only on
+`localhost`. This applies to servers under **Local servers**, `localhost` links in the
+terminal, and `localhost` addresses typed into the panel. The host serves each one on its
+Tailscale address at the same port, only to T3 Code clients.
+
+The port must be free on the host's Tailscale address. A `tailscale serve` rule on the
+same port blocks it; remove the rule with `tailscale serve --tcp <port> off`. HTTPS dev
+servers and LAN connections open directly, as before.
+
 ## Desktop-managed SSH
 
 In the desktop app, open **Settings → Connections → Add environment**, choose

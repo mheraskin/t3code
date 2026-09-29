@@ -77,6 +77,10 @@ export function createPreviewEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    openGateway: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:open-gateway",
+      tag: WS_METHODS.previewOpenGateway,
+    }),
     close: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:close",
       tag: WS_METHODS.previewClose,

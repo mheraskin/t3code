@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { isPublicFaviconHost } from "./hostClassification.ts";
+import { isPublicFaviconHost, isTailscaleHost } from "./hostClassification.ts";
 
 describe("isPublicFaviconHost", () => {
   it("treats public hosts as public", () => {
@@ -108,5 +108,19 @@ describe("isPublicFaviconHost", () => {
   it("rejects malformed IPv4 text as a public host", () => {
     expect(isPublicFaviconHost("10.0.0.999")).toBe(true);
     expect(isPublicFaviconHost("10.0.0")).toBe(true);
+  });
+});
+
+describe("isTailscaleHost", () => {
+  it("accepts tailnet addresses and MagicDNS names", () => {
+    for (const host of ["100.99.182.95", "xps.tail1ab873.ts.net", "[fd7a:115c:a1e0::1f35:b660]"]) {
+      expect(isTailscaleHost(host)).toBe(true);
+    }
+  });
+
+  it("rejects LAN, loopback, and public hosts", () => {
+    for (const host of ["192.168.18.142", "100.128.0.1", "localhost", "fd00::1", "example.com"]) {
+      expect(isTailscaleHost(host)).toBe(false);
+    }
   });
 });

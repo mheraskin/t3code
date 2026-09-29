@@ -73,6 +73,13 @@ load sibling assets; directory-scoped workspace previews are a separate grant.
 Clients should share the authored file reference so they do not disclose the
 temporary URL's credential.
 
+The [preview gateway](../../apps/server/src/preview/Gateway.ts) exposes a discovered
+loopback dev server on the host's Tailscale addresses at the same port. Its tokens are
+port-scoped bearer credentials minted over the authenticated RPC and traded for a cookie
+on the gateway origin. Browsers scope cookies by host, not port, so T3 session cookies
+reach the gateway too; it must strip every `t3_` cookie before forwarding, or a previewed
+app could read the user's T3 session.
+
 Host videos can change in place. Their [HTTP
 responses](../../apps/server/src/http.ts) omit cache validators because file
 metadata cannot prove byte-for-byte identity for `If-Range`. Adding weak
