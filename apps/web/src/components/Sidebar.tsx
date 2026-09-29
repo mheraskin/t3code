@@ -3436,6 +3436,17 @@ export default function Sidebar() {
     [unsnoozeThread],
   );
   const threadListRef = useRef<HTMLUListElement | null>(null);
+  // Opening a thread from anywhere (a notification, a shortcut, the palette)
+  // brings its row into view; "nearest" leaves an already visible row alone.
+  useEffect(() => {
+    if (routeThreadKey === null) return;
+    const frame = requestAnimationFrame(() => {
+      threadListRef.current
+        ?.querySelector(`[data-thread-key="${window.CSS.escape(routeThreadKey)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [routeThreadKey]);
   const dragLabelOffsetRef = useRef(0);
   const restrictBelowPins = useCallback<Modifier>(
     (args) => restrictBelowSidebarLabel(args, dragLabelOffsetRef.current),
