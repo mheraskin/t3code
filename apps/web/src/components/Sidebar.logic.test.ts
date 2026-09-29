@@ -33,6 +33,7 @@ import {
   shouldRecedeSidebarThread,
   sortLogicalProjectsForSidebar,
   nestSubThreads,
+  resolveSidebarHoldDrop,
   resolveSidebarDropTarget,
   pinOrderKeyBetween,
   planPinnedReorder,
@@ -2604,5 +2605,25 @@ describe("nestSubThreads", () => {
     // c nests under a, and b (under the filed c) keeps its own place.
     expect(ids(result)).toEqual([["main", ["a", "c", "b"]]]);
     expect([...result.subThreadKeys]).toEqual(["c"]);
+  });
+});
+
+describe("resolveSidebarHoldDrop", () => {
+  const drop = (offset: number, canNest: boolean, canReorder: boolean) =>
+    resolveSidebarHoldDrop({ targetKey: "t", offset, canNest, canReorder });
+
+  it("files into the middle of a row and reorders at its edges", () => {
+    expect(drop(0.1, true, true)).toEqual({ kind: "before", key: "t" });
+    expect(drop(0.5, true, true)).toEqual({ kind: "nest", key: "t" });
+    expect(drop(0.9, true, true)).toEqual({ kind: "after", key: "t" });
+  });
+
+  it("uses the whole row for whichever drop is possible", () => {
+    // Another branch group: a reorder would snap back, so the row only files.
+    expect(drop(0.1, true, false)).toEqual({ kind: "nest", key: "t" });
+    // A sub-thread target: halves reorder.
+    expect(drop(0.4, false, true)).toEqual({ kind: "before", key: "t" });
+    expect(drop(0.6, false, true)).toEqual({ kind: "after", key: "t" });
+    expect(drop(0.5, false, false)).toEqual({ kind: "none" });
   });
 });

@@ -185,6 +185,8 @@ import {
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveSidebarDropTarget,
+  resolveSidebarHoldDrop,
+  type SidebarHoldDrop,
   resolveSidebarDropVerb,
   resolveSidebarRowAccessibility,
   type SidebarDropVerb,
@@ -690,10 +692,7 @@ function SidebarSectionPlaceholder(props: {
 // Zero-height markers reserve no label space at rest. During a drag the
 // sorting strategy opens 24px for a 16px label with 4px clearance on each side.
 const SIDEBAR_DRAG_LABEL_HEIGHT = 24;
-// Pulling a dragged row this far right switches from reordering to filing it
-// under the thread beneath the pointer, the way outliners indent by drag.
-const SIDEBAR_NEST_OFFSET_PX = 32;
-// While filing, rows hold still so the pointer can land on a parent.
+// Inside Active, rows hold still so the pointer can land on the row it means.
 const holdRowsSortingStrategy: SortingStrategy = () => null;
 
 function SidebarDragBoundary(props: {
@@ -1036,12 +1035,6 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
       File under
     </>
   ),
-  "nest-hint": (
-    <>
-      <CornerDownRightIcon aria-hidden className="size-3" />
-      Pull right to file under
-    </>
-  ),
   pin: (
     <>
       <PinIcon aria-hidden className="size-3" />
@@ -1115,8 +1108,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   showProject: boolean;
   // Filed under the thread above it; inset so the parent reads as its head.
   isSubThread: boolean;
-  // The row a right-dragged thread would be filed under on release.
+  // The row a dragged thread would be filed under on release.
   isNestTarget: boolean;
+  // Where a dragged thread would land beside this row on release.
+  dropLine: "before" | "after" | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1532,7 +1527,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     shouldRecede &&
       (status === "working" || status === "monitoring") &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
-    (isFileDragOver || props.isNestTarget) && "ring-1 ring-inset ring-primary/70",
+    isFileDragOver && "ring-1 ring-inset ring-primary/70",
+    // The thread a drag would file under reads as the drop target outright.
+    props.isNestTarget && "bg-primary/10 ring-2 ring-inset ring-primary",
     // The hover tint must not clobber an active/selected row's own surface.
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     // The lifted row is an opaque card so the rows beneath it never show
@@ -2033,10 +2030,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         // Matches the content box height; the py-0.5 padding is added on top.
         "list-none py-0.5 [content-visibility:auto]",
         props.isSubThread && "pl-4",
+        props.dropLine && "relative",
         compact ? "[contain-intrinsic-size:auto_54px]" : "[contain-intrinsic-size:auto_78px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
+      {props.dropLine ? (
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-x-2 z-30 h-0.5 rounded-full bg-primary",
+            props.dropLine === "before" ? "-top-px" : "-bottom-px",
+          )}
+        />
+      ) : null}
       <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
         <TooltipTrigger
           render={
@@ -3431,16 +3438,12 @@ export default function Sidebar() {
   } | null>(null);
   const dragTargetSection = dragState?.targetSection ?? null;
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
-  // Filing mode: the list is locked to vertical movement, so the horizontal
-  // pull is read from the raw pointer rather than dnd-kit's modified delta.
-  const dragStartXRef = useRef<number | null>(null);
-  const [nesting, setNesting] = useState(false);
-  const [nestTargetKey, setNestTargetKey] = useState<string | null>(null);
-  const [draggedCanFile, setDraggedCanFile] = useState(false);
-  const nestTargetRef = useRef<string | null>(null);
-  nestTargetRef.current = nestTargetKey;
-  const nestingRef = useRef(false);
-  nestingRef.current = nesting;
+  // Inside Active the rows hold still and the pointer picks the drop directly
+  // (file under a row, or land beside it). Null elsewhere, where the animated
+  // section preview handles pinning and settling.
+  const [holdDrop, setHoldDrop] = useState<SidebarHoldDrop | null>(null);
+  const holdDropRef = useRef<SidebarHoldDrop | null>(null);
+  holdDropRef.current = holdDrop;
   const finishThreadDrag = useCallback((started: boolean) => {
     dragSensorRef.current = null;
     if (started) {
@@ -3617,8 +3620,6 @@ export default function Sidebar() {
       } else {
         dragLabelOffsetRef.current = 0;
       }
-      dragStartXRef.current =
-        event.activatorEvent instanceof PointerEvent ? event.activatorEvent.clientX : null;
       setDragState({
         activeKey,
         activeSection,
@@ -3847,81 +3848,143 @@ export default function Sidebar() {
       ),
     [threads],
   );
-  const draggedKeyForNesting = dragState?.activeKey ?? null;
+  // The branch group each visible Active row renders in; a drop beside a row
+  // in another group would snap back, so only same-group rows take a line.
+  const displayGroupByThreadKey = useMemo(
+    () =>
+      new Map(
+        visibleActiveGroups.flatMap((group) =>
+          group.threads.map(
+            (thread) =>
+              [
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                group.key,
+              ] as const,
+          ),
+        ),
+      ),
+    [visibleActiveGroups],
+  );
+  const draggedKeyForHold = dragState?.activeKey ?? null;
   // Shell updates stream in constantly while agents work; the listener reads
   // the latest lookups through a ref so it survives them for the whole drag.
-  const nestingLookupsRef = useRef({
+  const holdLookupsRef = useRef({
+    displayGroupByThreadKey,
     parentThreadKeys,
     sectionByThreadKey,
     serverConfigs,
     threadByKey,
   });
-  nestingLookupsRef.current = { parentThreadKeys, sectionByThreadKey, serverConfigs, threadByKey };
+  holdLookupsRef.current = {
+    displayGroupByThreadKey,
+    parentThreadKeys,
+    sectionByThreadKey,
+    serverConfigs,
+    threadByKey,
+  };
   useEffect(() => {
-    setNesting(false);
-    setNestTargetKey(null);
-    setDraggedCanFile(false);
-    if (draggedKeyForNesting === null) return;
-    const lookups = nestingLookupsRef.current;
-    const dragged = lookups.threadByKey.get(draggedKeyForNesting);
-    if (
-      dragged === undefined ||
-      lookups.parentThreadKeys.has(draggedKeyForNesting) ||
-      lookups.serverConfigs.get(dragged.environmentId)?.environment.capabilities.threadParenting !==
-        true
-    ) {
+    const lookups = holdLookupsRef.current;
+    const dragged =
+      draggedKeyForHold === null ? undefined : lookups.threadByKey.get(draggedKeyForHold);
+    const list = threadListRef.current;
+    if (draggedKeyForHold === null || dragged === undefined || list === null) {
+      setHoldDrop(null);
       return;
     }
-    setDraggedCanFile(true);
-    const onPointerMove = (event: PointerEvent) => {
-      const startX = dragStartXRef.current;
-      const filing = startX !== null && event.clientX - startX > SIDEBAR_NEST_OFFSET_PX;
-      setNesting(filing);
-      if (!filing) {
-        setNestTargetKey(null);
-        return;
-      }
-      const { sectionByThreadKey: sections, threadByKey: threadsByKey } = nestingLookupsRef.current;
-      const targetKey =
-        document
-          .elementsFromPoint(event.clientX, event.clientY)
-          .map((element) => element.closest<HTMLElement>("[data-thread-key]")?.dataset.threadKey)
-          .find((key) => key !== undefined && key !== draggedKeyForNesting) ?? null;
-      const target = targetKey === null ? undefined : threadsByKey.get(targetKey);
-      // A parent is a top-level Active thread on the same environment.
-      setNestTargetKey(
-        target !== undefined &&
-          sections.get(targetKey!) === "active" &&
-          target.environmentId === dragged.environmentId &&
-          !target.parentThreadId
-          ? targetKey
-          : null,
+    const draggedCanFile =
+      !lookups.parentThreadKeys.has(draggedKeyForHold) &&
+      lookups.serverConfigs.get(dragged.environmentId)?.environment.capabilities.threadParenting ===
+        true;
+    const none: SidebarHoldDrop = { kind: "none" };
+    const update = (next: SidebarHoldDrop | null) =>
+      setHoldDrop((current) =>
+        current === next ||
+        (current !== null &&
+          next !== null &&
+          current.kind === next.kind &&
+          (current.kind === "none" || (next.kind !== "none" && current.key === next.key)))
+          ? current
+          : next,
       );
+    // A drag that starts in Active holds the rows from the first frame.
+    update(lookups.sectionByThreadKey.get(draggedKeyForHold) === "active" ? none : null);
+    const onPointerMove = (event: PointerEvent) => {
+      const {
+        displayGroupByThreadKey: groups,
+        sectionByThreadKey: sections,
+        threadByKey: byKey,
+      } = holdLookupsRef.current;
+      // The Active band: from its first group header to its last row. Above or
+      // below it the animated preview takes over for pinning and settling.
+      const rows = [...list.querySelectorAll<HTMLElement>("[data-thread-key]")].filter((row) => {
+        const key = row.dataset.threadKey!;
+        return key !== draggedKeyForHold && sections.get(key) === "active";
+      });
+      const bandElements = [
+        ...list.querySelectorAll<HTMLElement>('[data-testid="sidebar-worktree-group"]'),
+        ...rows,
+      ].map((element) => element.getBoundingClientRect());
+      if (bandElements.length === 0) return update(null);
+      const bandTop = Math.min(...bandElements.map((rect) => rect.top));
+      const bandBottom = Math.max(...bandElements.map((rect) => rect.bottom));
+      if (event.clientY < bandTop || event.clientY > bandBottom) return update(null);
+      for (const row of rows) {
+        const rect = row.getBoundingClientRect();
+        if (event.clientY < rect.top || event.clientY >= rect.bottom) continue;
+        const targetKey = row.dataset.threadKey!;
+        const target = byKey.get(targetKey);
+        if (target === undefined) break;
+        return update(
+          resolveSidebarHoldDrop({
+            targetKey,
+            offset: (event.clientY - rect.top) / rect.height,
+            canNest:
+              draggedCanFile &&
+              target.environmentId === dragged.environmentId &&
+              !target.parentThreadId,
+            canReorder: groups.get(targetKey) === groups.get(draggedKeyForHold),
+          }),
+        );
+      }
+      // Over a group header or the dragged row's empty slot.
+      update(none);
     };
     window.addEventListener("pointermove", onPointerMove);
     return () => window.removeEventListener("pointermove", onPointerMove);
-  }, [draggedKeyForNesting]);
+  }, [draggedKeyForHold]);
 
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeKey = String(event.active.id);
-      const nestParent =
-        nestTargetRef.current === null ? undefined : threadByKey.get(nestTargetRef.current);
-      if (nestParent !== undefined) {
+      const hold = holdDropRef.current;
+      if (hold?.kind === "nest") {
         const child = threadByKey.get(activeKey);
-        if (child !== undefined) {
-          void setThreadParent(scopeThreadRef(child.environmentId, child.id), nestParent.id);
+        const parent = threadByKey.get(hold.key);
+        if (child !== undefined && parent !== undefined) {
+          void setThreadParent(scopeThreadRef(child.environmentId, child.id), parent.id);
         }
         return;
       }
-      // Released while filing but off any valid parent: the rows held still,
-      // so a reorder would land somewhere the list never previewed.
-      if (nestingRef.current) return;
+      // Released inside Active but off any row: the rows held still, so there
+      // is no previewed position to land in.
+      if (hold?.kind === "none") return;
       const activeSection = sectionByThreadKey.get(activeKey);
-      const target =
-        event.over === null
+      const target = (() => {
+        if (hold !== null) {
+          const activeOrder = activeKeys.filter((key) => key !== activeKey);
+          const index = activeOrder.indexOf(hold.key);
+          if (index === -1) return null;
+          activeOrder.splice(hold.kind === "before" ? index : index + 1, 0, activeKey);
+          return {
+            section: "active" as const,
+            pinnedOrder: pinnedKeys.filter((key) => key !== activeKey),
+            activeOrder,
+          };
+        }
+        return event.over === null
           ? null
           : resolveSidebarDropTarget(sidebarListItems, activeKey, String(event.over.id));
+      })();
       const activeThread = threadByKey.get(activeKey);
       if (activeSection === undefined || target === null || activeThread === undefined) return;
       const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
@@ -5112,7 +5175,7 @@ export default function Sidebar() {
                 <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
                 <SortableContext
                   items={sortableIds}
-                  strategy={nesting ? holdRowsSortingStrategy : sidebarSortingStrategy}
+                  strategy={holdDrop !== null ? holdRowsSortingStrategy : sidebarSortingStrategy}
                 >
                   <ul
                     ref={attachListMotionRef}
@@ -5173,14 +5236,12 @@ export default function Sidebar() {
                             dropVerb={
                               dragState?.activeKey !== threadKey
                                 ? null
-                                : nesting
-                                  ? nestTargetKey === null
-                                    ? null
-                                    : "nest"
-                                  : (resolveSidebarDropVerb(
+                                : holdDrop?.kind === "nest"
+                                  ? "nest"
+                                  : resolveSidebarDropVerb(
                                       dragState.activeSection,
-                                      dragTargetSection,
-                                    ) ?? (draggedCanFile ? "nest-hint" : null))
+                                      holdDrop !== null ? "active" : dragTargetSection,
+                                    )
                             }
                             dragOverPinned={
                               dragState?.activeKey === threadKey && dragTargetSection === "pinned"
@@ -5220,7 +5281,13 @@ export default function Sidebar() {
                             }
                             showProject={section !== "active"}
                             isSubThread={section === "active" && subThreadKeys.has(threadKey)}
-                            isNestTarget={nestTargetKey === threadKey}
+                            isNestTarget={holdDrop?.kind === "nest" && holdDrop.key === threadKey}
+                            dropLine={
+                              (holdDrop?.kind === "before" || holdDrop?.kind === "after") &&
+                              holdDrop.key === threadKey
+                                ? holdDrop.kind
+                                : null
+                            }
                             providerEntryByInstanceId={
                               providerEntriesByEnvironment.get(thread.environmentId) ??
                               EMPTY_PROVIDER_ENTRIES
@@ -5316,7 +5383,7 @@ export default function Sidebar() {
                                 key="pinned-header"
                                 marker="pinned-header"
                                 label="Pinned"
-                                visible={from !== null}
+                                visible={from !== null && holdDrop === null}
                                 isDropTarget={dragTargetSection === "pinned"}
                               />,
                             );
@@ -5327,7 +5394,7 @@ export default function Sidebar() {
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
-                                visible={from !== null}
+                                visible={from !== null && holdDrop === null}
                                 isDropTarget={dragTargetSection === "active"}
                               />,
                             );

@@ -255,6 +255,29 @@ export function nestSubThreads<
   return { groups: nested, subThreadKeys };
 }
 
+/** Where a drag inside Active lands. The rows hold still, so the pointer
+    picks a row directly: its middle files the dragged thread under it, its
+    edges place the thread before or after it. "none" drops nothing. */
+export type SidebarHoldDrop =
+  | { readonly kind: "none" }
+  | { readonly kind: "nest" | "before" | "after"; readonly key: string };
+
+export function resolveSidebarHoldDrop(input: {
+  readonly targetKey: string;
+  /** Pointer position within the row, 0 at its top edge and 1 at its bottom. */
+  readonly offset: number;
+  /** The target can take the dragged thread as a sub-thread. */
+  readonly canNest: boolean;
+  /** A drop beside the target stays there (same group), so the line is honest. */
+  readonly canReorder: boolean;
+}): SidebarHoldDrop {
+  const { targetKey, offset, canNest, canReorder } = input;
+  const edge = offset < 0.5 ? "before" : "after";
+  if (!canNest) return canReorder ? { kind: edge, key: targetKey } : { kind: "none" };
+  const nearEdge = offset < 0.25 || offset > 0.75;
+  return canReorder && nearEdge ? { kind: edge, key: targetKey } : { kind: "nest", key: targetKey };
+}
+
 export type SidebarThreadDropPlan =
   | { readonly kind: "none" }
   /** Within the pinned block: the existing key writes. */
@@ -285,15 +308,7 @@ export type SidebarThreadDropPlan =
 /** What dropping in `to` does to a thread lifted from `from`, for the badge
     on the lifted row. Null while reordering inside one section and for the
     snoozed shelf, which cannot be a drop target. */
-export type SidebarDropVerb =
-  | "pin"
-  | "unpin"
-  | "settle"
-  | "unsettle"
-  | "wake"
-  | "nest"
-  /** Shown while reordering a thread that could be filed instead. */
-  | "nest-hint";
+export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake" | "nest";
 
 export function resolveSidebarDropVerb(
   from: SidebarSection,
