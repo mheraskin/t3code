@@ -686,3 +686,63 @@ effectIt.effect("does not swallow process probe interruption", () =>
     }
   }),
 );
+
+const processOutput = (stdout: string) =>
+  Effect.succeed({
+    stdout,
+    stderr: "",
+    code: null,
+    timedOut: false,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    stdoutInvalidUtf8: false,
+    stderrInvalidUtf8: false,
+  });
+
+const htmlFetch = (() =>
+  Promise.resolve(
+    new Response("hello", { headers: { "content-type": "text/html" } }),
+  )) as typeof globalThis.fetch;
+
+effectIt.effect("adds Linux listeners that only ss can see, such as Docker ports", () => {
+  const dockerPort = 43_127;
+  const tailnetOnlyPort = 43_128;
+  const ssOutput = [
+    `LISTEN 0 511 *:${LSOF_TEST_PORT} *:*`,
+    `LISTEN 0 4096 127.0.0.1:${dockerPort} 0.0.0.0:*`,
+    `LISTEN 0 4096 100.99.182.95:${tailnetOnlyPort} 0.0.0.0:*`,
+    `LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*`,
+  ].join("\n");
+  const layer = makeProbeFailureLayer(
+    (input) =>
+      input.command === "ss"
+        ? processOutput(ssOutput)
+        : processOutput(`p1234\ncnode\nn*:${LSOF_TEST_PORT}\n`),
+    htmlFetch,
+  );
+
+  return Effect.gen(function* () {
+    const scanner = yield* PortScanner.PortDiscovery;
+    const servers = yield* scanner.scan();
+    expect(servers.map((server) => [server.port, server.processName])).toEqual([
+      [LSOF_TEST_PORT, "node"],
+      [dockerPort, null],
+    ]);
+  }).pipe(Effect.provide(layer));
+});
+
+effectIt.effect("uses ss listeners on Linux when lsof is unavailable", () => {
+  const layer = makeProbeFailureLayer(
+    (input) =>
+      input.command === "ss"
+        ? processOutput(`LISTEN 0 4096 [::1]:${LSOF_TEST_PORT} [::]:*`)
+        : processProbeFailure(input),
+    htmlFetch,
+  );
+
+  return Effect.gen(function* () {
+    const scanner = yield* PortScanner.PortDiscovery;
+    const servers = yield* scanner.scan();
+    expect(servers.map((server) => server.port)).toEqual([LSOF_TEST_PORT]);
+  }).pipe(Effect.provide(layer));
+});
