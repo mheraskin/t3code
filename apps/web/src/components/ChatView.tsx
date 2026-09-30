@@ -2149,6 +2149,21 @@ function ChatViewContent(props: ChatViewProps) {
   const threadFork = useThreadForkActions(isServerThread ? activeThread : null, {
     panelHostThreadId: panelHostThreadId ?? activeThreadId,
   });
+  const { forkLatest, latest: latestFork } = threadFork;
+  const openSideChat = useCallback(() => {
+    if (!latestFork.enabled) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Side chat unavailable",
+          description: latestFork.disabledReason ?? "Complete a turn before opening a side chat.",
+        }),
+      );
+      return false;
+    }
+    void forkLatest(true);
+    return true;
+  }, [forkLatest, latestFork]);
   const openExistingSideChat = useCallback(
     (sideChatThreadId: ThreadId) => {
       if (!activeThreadRef) return;
@@ -7816,9 +7831,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       return;
     }
-    // Providers without the legacy toggle receive their native commands unchanged.
     const standaloneSlashCommand =
-      sendInteractionModeEnabled &&
       composerImages.length === 0 &&
       composerFiles.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
@@ -7826,7 +7839,16 @@ function ChatViewContent(props: ChatViewProps) {
       composerReviewComments.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
-    if (standaloneSlashCommand && multipleModelSelections === null) {
+    if (standaloneSlashCommand === "side") {
+      if (openSideChat()) {
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      }
+      return;
+    }
+    // Providers without the legacy toggle receive their native commands unchanged.
+    if (standaloneSlashCommand && sendInteractionModeEnabled && multipleModelSelections === null) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -10267,6 +10289,7 @@ function ChatViewContent(props: ChatViewProps) {
                             }
                             isPreparingWorktree={isPreparingWorktree}
                             bannerItems={composerBannerItems}
+                            onOpenSideChat={openSideChat}
                             // With attachments or contexts aboard the pick just inserts the
                             // text, so it sends as a prompt like the typed path would.
                             onUsageLimitsCommand={

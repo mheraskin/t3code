@@ -87,9 +87,20 @@ export function buildComposerSlashCommandItems(input: {
       label: "/default",
       description: "Switch to default mode",
     },
+    {
+      id: "cmd:side",
+      type: "slash-command",
+      command: "side",
+      label: "/side",
+      description: "Open a side chat with this conversation’s context",
+    },
   ] satisfies ComposerCommandItem[];
   const items: ComposerCommandItem[] = builtIn.filter(
-    (item) => item.command.includes(query) && (item.command === "model" || allowInteractionMode),
+    (item) =>
+      item.command.includes(query) &&
+      (item.command === "side"
+        ? input.hasThread
+        : item.command === "model" || allowInteractionMode),
   );
 
   // Providers expand commands only at the start of a message. T3 commands
@@ -175,6 +186,7 @@ export function useComposerCommandMenu({
   onChangeDraftMessage,
   onUpdateInteractionMode,
   onUsageLimits,
+  onOpenSideChat,
 }: {
   readonly draftMessage: string;
   readonly ownerKey: string | null;
@@ -192,6 +204,7 @@ export function useComposerCommandMenu({
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
   /** Picking /usage-limits is the action itself; the draft keeps nothing of it. */
   readonly onUsageLimits?: () => void;
+  readonly onOpenSideChat?: (() => void) | undefined;
 }) {
   const [selection, setSelection] = useState(() => composerSelectionAtEnd(draftMessage));
   const previousOwnerKeyRef = useRef(ownerKey);
@@ -511,6 +524,15 @@ export function useComposerCommandMenu({
         return;
       }
 
+      if (item.type === "slash-command" && item.command === "side") {
+        if (!onOpenSideChat) return;
+        const cleared = replaceTextRange(draftMessage, trigger.rangeStart, trigger.rangeEnd, "");
+        setSelection({ start: cleared.cursor, end: cleared.cursor });
+        onChangeDraftMessage(cleared.text);
+        onOpenSideChat();
+        return;
+      }
+
       if (
         item.type === "provider-slash-command" &&
         item.command.name === USAGE_LIMITS_COMMAND.name &&
@@ -544,6 +566,7 @@ export function useComposerCommandMenu({
       onChangeDraftMessage,
       onUpdateInteractionMode,
       onUsageLimits,
+      onOpenSideChat,
       selectedProviderStatus?.showInteractionModeToggle,
       trigger,
     ],

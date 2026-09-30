@@ -724,6 +724,11 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
 });
 
 describe("parseStandaloneComposerSlashCommand", () => {
+  it("recognizes a standalone side-chat command without consuming a prompt with arguments", () => {
+    expect(parseStandaloneComposerSlashCommand(" /SIDE ")).toBe("side");
+    expect(parseStandaloneComposerSlashCommand("/side explain this")).toBeNull();
+  });
+
   it("parses standalone /plan command", () => {
     expect(parseStandaloneComposerSlashCommand(" /plan ")).toBe("plan");
   });

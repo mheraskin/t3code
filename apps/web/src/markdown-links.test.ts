@@ -11,7 +11,7 @@ import {
   resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
   shouldOpenMarkdownFileLinkInBrowserByDefault,
-  shouldOpenMarkdownFileLinkInEditor,
+  shouldCopyMarkdownFileLinkPath,
 } from "./markdown-links";
 
 describe("isWindowsDrivePathHref", () => {
@@ -61,23 +61,23 @@ describe("extractMarkdownLinkHrefs", () => {
   });
 });
 
-describe("shouldOpenMarkdownFileLinkInEditor", () => {
+describe("shouldCopyMarkdownFileLinkPath", () => {
   it("uses command-click on macOS", () => {
-    expect(shouldOpenMarkdownFileLinkInEditor({ metaKey: true, ctrlKey: false }, "MacIntel")).toBe(
+    expect(shouldCopyMarkdownFileLinkPath({ metaKey: true, ctrlKey: false }, "MacIntel")).toBe(
       true,
     );
-    expect(shouldOpenMarkdownFileLinkInEditor({ metaKey: false, ctrlKey: true }, "MacIntel")).toBe(
+    expect(shouldCopyMarkdownFileLinkPath({ metaKey: false, ctrlKey: true }, "MacIntel")).toBe(
       false,
     );
   });
 
   it("uses control-click on other platforms", () => {
-    expect(
-      shouldOpenMarkdownFileLinkInEditor({ metaKey: false, ctrlKey: true }, "Linux x86_64"),
-    ).toBe(true);
-    expect(
-      shouldOpenMarkdownFileLinkInEditor({ metaKey: true, ctrlKey: false }, "Linux x86_64"),
-    ).toBe(false);
+    expect(shouldCopyMarkdownFileLinkPath({ metaKey: false, ctrlKey: true }, "Linux x86_64")).toBe(
+      true,
+    );
+    expect(shouldCopyMarkdownFileLinkPath({ metaKey: true, ctrlKey: false }, "Linux x86_64")).toBe(
+      false,
+    );
   });
 });
 

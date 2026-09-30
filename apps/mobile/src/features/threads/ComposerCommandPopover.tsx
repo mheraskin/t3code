@@ -7,7 +7,7 @@ import type {
   ServerProviderSkill,
   ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
+import type { ComposerSlashCommand, ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
 import { memo } from "react";
 import { Pressable, ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
 
@@ -34,7 +34,7 @@ export type ComposerCommandItem =
   | {
       readonly id: string;
       readonly type: "slash-command";
-      readonly command: string;
+      readonly command: ComposerSlashCommand;
       readonly label: string;
       readonly description: string;
     }

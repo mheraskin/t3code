@@ -155,7 +155,7 @@ import {
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
   shouldOpenMarkdownFileLinkInBrowserByDefault,
-  shouldOpenMarkdownFileLinkInEditor,
+  shouldCopyMarkdownFileLinkPath,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
@@ -2220,8 +2220,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
-                  handleOpenInEditor();
+                if (shouldCopyMarkdownFileLinkPath(event)) {
+                  handleCopy(displayPath, "Relative path");
                   return;
                 }
                 if (useBrowserPrimaryAction) {
@@ -2242,7 +2242,15 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               aria-haspopup="menu"
               className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, "select-text")}
               data-markdown-copy={copyMarkdown}
-              onClick={handleContextMenu}
+              onClick={(event) => {
+                if (shouldCopyMarkdownFileLinkPath(event)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleCopy(displayPath, "Relative path");
+                  return;
+                }
+                handleContextMenu(event);
+              }}
               onContextMenu={handleContextMenu}
             >
               <FileTagChipContent path={iconPath} label={label} theme={theme} />

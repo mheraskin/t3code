@@ -148,6 +148,7 @@ export interface ThreadComposerProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onOpenSideChat?: (() => void) | undefined;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
@@ -344,7 +345,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       draftKey: composerOwnerKey,
     });
   };
-  const { onSendMessage, onChangeDraftMessage, onShowUsageLimits } = props;
+  const { onSendMessage, onChangeDraftMessage, onShowUsageLimits, onOpenSideChat } = props;
   // T3 owns /usage-limits only where Limits has data for the selected provider;
   // elsewhere the name stays the provider's own and is sent through untouched.
   const usageLimitsOffered =
@@ -380,6 +381,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     pullRequestRepository: project?.repositoryIdentity?.displayName ?? null,
     selectedProviderStatus,
     hasThread: true,
+    onOpenSideChat,
     hasCompactableConversation: props.hasCompactableConversation,
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode:
@@ -485,6 +487,21 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       if (openUsageLimits()) onChangeDraftMessage("");
       return;
     }
+    if (
+      props.draftMessage.trim().toLowerCase() === "/side" &&
+      props.draftAttachments.length === 0
+    ) {
+      if (onOpenSideChat) {
+        onChangeDraftMessage("");
+        onOpenSideChat();
+      } else {
+        Alert.alert(
+          "Side chat unavailable",
+          "Complete a turn with a provider that supports forking.",
+        );
+      }
+      return;
+    }
     const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
     if (inFlightThreadIdsRef.current.has(threadKey)) return;
     inFlightThreadIdsRef.current.add(threadKey);
@@ -508,6 +525,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   }, [
     props.draftMessage,
     props.draftAttachments.length,
+    onOpenSideChat,
     onChangeDraftMessage,
     openUsageLimits,
     usageLimitsOffered,

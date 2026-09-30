@@ -2,6 +2,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import {
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
+  type OrchestrationMessage,
   type ServerConfig,
   type ServerProviderSessionFork,
   type ThreadId,
@@ -83,6 +84,34 @@ export function canForkMobileAssistantMessage(input: {
     );
   }
   return input.capability === "latest-turn" && input.messageTurnId === latestCompletedTurnId;
+}
+
+/** Pick the same completed response that the side-chat action can fork. */
+export function resolveMobileSideChatTarget(input: {
+  readonly capability: ServerProviderSessionFork | undefined;
+  readonly latestTurn: OrchestrationLatestTurn | null | undefined;
+  readonly messages: ReadonlyArray<
+    Pick<OrchestrationMessage, "id" | "role" | "streaming" | "turnId">
+  >;
+  readonly completedTurnIds: ReadonlySet<TurnId>;
+}) {
+  if (input.capability === undefined || input.capability === "unsupported") return null;
+  const latest = input.latestTurn;
+  if (resolveMobileLatestCompletedTurnId(latest) && latest?.assistantMessageId) {
+    return { turnId: latest.turnId, messageId: latest.assistantMessageId };
+  }
+  if (input.capability !== "any-turn" || !latest || latest.state === "completed") return null;
+  const message = input.messages.findLast(
+    (candidate) =>
+      candidate.role === "assistant" &&
+      !candidate.streaming &&
+      canForkMobileAssistantMessage({
+        ...input,
+        completed: true,
+        messageTurnId: candidate.turnId,
+      }),
+  );
+  return message?.turnId ? { turnId: message.turnId, messageId: message.id } : null;
 }
 
 export interface MobileSideChatMenuItem {

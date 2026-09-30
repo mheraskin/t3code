@@ -1,3 +1,4 @@
+import type { ComposerSlashCommand } from "@t3tools/shared/composerTrigger";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import type { AssistantCitation } from "@t3tools/contracts";
 import {
@@ -9,8 +10,9 @@ import {
   type ComposerPromptSegment,
 } from "./composer-editor-mentions";
 
+export type { ComposerSlashCommand } from "@t3tools/shared/composerTrigger";
+
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {
@@ -280,11 +282,12 @@ export function composerStateAtPromptEnd(text: string): {
 export function parseStandaloneComposerSlashCommand(
   text: string,
 ): Exclude<ComposerSlashCommand, "model"> | null {
-  const match = /^\/(plan|default)\s*$/i.exec(text.trim());
+  const match = /^\/(plan|default|side)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
   const command = match[1]?.toLowerCase();
+  if (command === "side") return "side";
   if (command === "plan") return "plan";
   return "default";
 }

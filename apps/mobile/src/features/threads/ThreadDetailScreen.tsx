@@ -191,6 +191,7 @@ export interface ThreadDetailScreenProps {
   readonly showContent?: boolean;
   readonly forkCapability?: ServerProviderSessionFork;
   readonly completedForkTurnIds: ReadonlySet<TurnId>;
+  readonly onOpenSideChat?: (() => void) | undefined;
   readonly onForkAssistantMessage?: (input: {
     readonly messageId: MessageId;
     readonly turnId: TurnId;
@@ -1115,6 +1116,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   onStopThread={props.onStopThread}
                   onSendMessage={handleSendMessage}
                   onShowUsageLimits={showUsageLimits}
+                  onOpenSideChat={props.onOpenSideChat}
                   onUpdateModelSelection={props.onUpdateThreadModelSelection}
                   onUpdateRuntimeMode={props.onUpdateThreadRuntimeMode}
                   onUpdateInteractionMode={props.onUpdateThreadInteractionMode}

@@ -104,6 +104,7 @@ import {
   canForkMobileAssistantMessage,
   completedTurnIdsFromCheckpoints,
   resolveMobileThreadForkCapability,
+  resolveMobileSideChatTarget,
 } from "./sideChats.logic";
 import { useThreadDeleteAction } from "../home/useThreadListActions";
 
@@ -773,6 +774,32 @@ function ThreadRouteContent(
     [],
   );
 
+  const sideChatTarget = useMemo(
+    () =>
+      resolveMobileSideChatTarget({
+        capability: forkCapability,
+        latestTurn: selectedThread?.latestTurn,
+        messages: selectedThreadDetail?.messages ?? [],
+        completedTurnIds: completedForkTurnIds,
+      }),
+    [
+      completedForkTurnIds,
+      forkCapability,
+      selectedThread?.latestTurn,
+      selectedThreadDetail?.messages,
+    ],
+  );
+  const handleOpenSideChat = useCallback(() => {
+    if (!sideChatTarget) {
+      Alert.alert(
+        "Side chat unavailable",
+        "Complete a turn with a provider that supports forking.",
+      );
+      return;
+    }
+    void handleForkAssistantMessage({ ...sideChatTarget, sideChat: true });
+  }, [handleForkAssistantMessage, sideChatTarget]);
+
   const handlePromoteSideChat = useCallback(async () => {
     if (!selectedThread || selectedThread.sideChat !== true) return;
     const result = await updateThreadMetadata({
@@ -1256,6 +1283,7 @@ function ThreadRouteContent(
           forkCapability={forkCapability}
           completedForkTurnIds={completedForkTurnIds}
           onForkAssistantMessage={handleForkAssistantMessage}
+          onOpenSideChat={handleOpenSideChat}
           {...(forkOriginPresentation?.kind === "available"
             ? {
                 forkOrigin: {

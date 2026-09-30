@@ -216,6 +216,10 @@ On web and desktop, right-click media to save it or copy its path or URL. On mob
 touch and hold an image or video thumbnail and choose **Save or share**. On iOS,
 return to the thumbnail to open this menu after watching a full-screen video.
 
+On web and desktop, Command-click a file link on macOS, or Control-click on Windows
+and Linux, to copy its relative path. Right-click for **Copy full path** or to open
+the file in your editor.
+
 File links refer to the environment's machine, including when you connect remotely.
 Previews use the original file, even outside the workspace. Moving or deleting it
 can break the preview, so save a copy if you need to keep it.

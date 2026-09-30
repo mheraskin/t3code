@@ -14,6 +14,7 @@ import {
   completedTurnIdsFromCheckpoints,
   type ForkCapabilityConfig,
   resolveMobileThreadForkCapability,
+  resolveMobileSideChatTarget,
   visibleTopLevelThreads,
 } from "./sideChats.logic";
 
@@ -207,5 +208,75 @@ describe("mobile message fork availability", () => {
         }),
       ).toBe(false);
     }
+  });
+});
+
+describe("/side fork target", () => {
+  it.each(["any-turn", "latest-turn"] as const)(
+    "uses the latest completed response with %s support before checkpoints arrive",
+    (capability) => {
+      expect(
+        resolveMobileSideChatTarget({
+          capability,
+          latestTurn,
+          messages: [],
+          completedTurnIds: new Set(),
+        }),
+      ).toEqual({ turnId: latestTurn.turnId, messageId: latestTurn.assistantMessageId });
+    },
+  );
+
+  it("skips unfinished responses and forks a previous completed turn only with any-turn support", () => {
+    const previousTurn = TurnId.make("turn-1");
+    const previousMessage = MessageId.make("message-1");
+    const input = {
+      latestTurn: { ...latestTurn, state: "running" as const, completedAt: null },
+      messages: [
+        { id: previousMessage, turnId: previousTurn, role: "assistant" as const, streaming: false },
+        {
+          id: MessageId.make("interrupted"),
+          turnId: TurnId.make("interrupted"),
+          role: "assistant" as const,
+          streaming: false,
+        },
+        {
+          id: latestTurn.assistantMessageId,
+          turnId: latestTurn.turnId,
+          role: "assistant" as const,
+          streaming: true,
+        },
+      ],
+      completedTurnIds: new Set([previousTurn]),
+    };
+    expect(resolveMobileSideChatTarget({ ...input, capability: "any-turn" })).toEqual({
+      turnId: previousTurn,
+      messageId: previousMessage,
+    });
+    expect(resolveMobileSideChatTarget({ ...input, capability: "latest-turn" })).toBeNull();
+  });
+
+  it.each([undefined, "unsupported"] as const)(
+    "rejects unsupported providers: %s",
+    (capability) => {
+      expect(
+        resolveMobileSideChatTarget({
+          capability,
+          latestTurn,
+          messages: [],
+          completedTurnIds: new Set(),
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it("does not fork an empty conversation", () => {
+    expect(
+      resolveMobileSideChatTarget({
+        capability: "any-turn",
+        latestTurn: null,
+        messages: [],
+        completedTurnIds: new Set(),
+      }),
+    ).toBeNull();
   });
 });

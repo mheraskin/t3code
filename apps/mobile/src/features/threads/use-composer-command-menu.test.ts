@@ -101,3 +101,20 @@ describe("mobile slash commands", () => {
     ).toEqual({ text: "/plan ", cursor: 6, interactionMode: null });
   });
 });
+
+describe("/side availability", () => {
+  it.each([
+    { hasThread: true, expected: ["cmd:side"] },
+    { hasThread: false, expected: [] },
+  ])("keeps /side discoverable in existing conversations: %j", ({ expected, ...availability }) => {
+    expect(
+      buildComposerSlashCommandItems({
+        ...availability,
+        query: "side",
+        atMessageStart: false,
+        allowInteractionMode: false,
+        selectedProviderStatus: null,
+      }).map((item) => item.id),
+    ).toEqual(expected);
+  });
+});

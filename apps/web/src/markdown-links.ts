@@ -38,7 +38,7 @@ export function extractMarkdownLinkHrefs(markdown: string): string[] {
   return hrefs;
 }
 
-export function shouldOpenMarkdownFileLinkInEditor(
+export function shouldCopyMarkdownFileLinkPath(
   event: Pick<MouseEvent, "metaKey" | "ctrlKey">,
   platform?: string,
 ): boolean {
