@@ -122,7 +122,8 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 `chat.new` may ask you to choose a project when there is more than one.
 `chat.newLocal` skips that chooser. Both use your
-[new-thread defaults](./thread-sidebar.md#start-a-thread).
+[new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
+(`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 
 `chat.sideChat` opens a side chat from the active conversation's latest completed turn and
 defaults to `mod+shift+b`. `chat.forkThread` creates a normal fork from the same point and has no
