@@ -12,6 +12,7 @@ import {
   type EnvironmentId,
   type ProviderInstanceId,
   type ServerConfig,
+  type ScopedThreadRef,
   type ThreadId,
   type TurnId,
   threadProviderInstanceId,
@@ -113,10 +114,10 @@ export function useThreadForkActions(
       target: ThreadForkTarget,
       sideChat: boolean,
       sourceOverride?: ForkSourceThread,
-    ): Promise<boolean> => {
+    ): Promise<ScopedThreadRef | null> => {
       const currentSourceThread = sourceOverride ?? latestInputsRef.current.sourceThread;
-      if (!currentSourceThread) return false;
-      if (forkInFlightRef.current) return false;
+      if (!currentSourceThread) return null;
+      if (forkInFlightRef.current) return null;
       // Resolve the panel host before awaiting, because the user can navigate
       // while the fork syncs. The side chat must open beside the thread the
       // user started it from, not wherever the route ended up.
@@ -148,7 +149,7 @@ export function useThreadForkActions(
               }),
             );
           }
-          return false;
+          return null;
         }
 
         const forkedThreadRef = scopeThreadRef(currentSourceThread.environmentId, threadId);
@@ -162,7 +163,7 @@ export function useThreadForkActions(
               description: error instanceof Error ? error.message : "The thread is still syncing.",
             }),
           );
-          return false;
+          return null;
         }
 
         if (sideChat) {
@@ -176,14 +177,14 @@ export function useThreadForkActions(
             });
           }
           useRightPanelStore.getState().openSideChat(hostRef, threadId);
-          return true;
+          return forkedThreadRef;
         }
 
         await latestInputsRef.current.navigate({
           to: "/$environmentId/$threadId",
           params: { environmentId: currentSourceThread.environmentId, threadId },
         });
-        return true;
+        return forkedThreadRef;
       } finally {
         forkInFlightRef.current = false;
       }
@@ -196,14 +197,14 @@ export function useThreadForkActions(
       const target = latestInputsRef.current.latestTarget;
       return latestInputsRef.current.latestEnabled && target
         ? dispatchFork(target, sideChat)
-        : Promise.resolve(false);
+        : Promise.resolve(null);
     },
     [dispatchFork],
   );
 
   const forkTarget = useCallback(
     (source: ForkSourceThread, target: ThreadForkTarget, sideChat: boolean) =>
-      dispatchFork(target, sideChat, source),
+      dispatchFork(target, sideChat, source).then((ref) => ref !== null),
     [dispatchFork],
   );
 
@@ -224,7 +225,10 @@ export function useThreadForkActions(
       ) {
         return Promise.resolve(false);
       }
-      return dispatchFork({ turnId: input.turnId, messageId: input.messageId }, input.sideChat);
+      return dispatchFork(
+        { turnId: input.turnId, messageId: input.messageId },
+        input.sideChat,
+      ).then((ref) => ref !== null);
     },
     [dispatchFork],
   );

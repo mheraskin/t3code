@@ -191,7 +191,7 @@ export interface ThreadDetailScreenProps {
   readonly showContent?: boolean;
   readonly forkCapability?: ServerProviderSessionFork;
   readonly completedForkTurnIds: ReadonlySet<TurnId>;
-  readonly onOpenSideChat?: (() => void) | undefined;
+  readonly onOpenSideChat?: ((message?: string) => Promise<boolean>) | undefined;
   readonly onForkAssistantMessage?: (input: {
     readonly messageId: MessageId;
     readonly turnId: TurnId;

@@ -1,4 +1,5 @@
 import { ChatGptUsageLimitNotice } from "./ChatGptUsageLimitNotice";
+import { parseComposerSideChatCommand } from "@t3tools/shared/composerTrigger";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useAtomValue } from "@effect/atom-react";
@@ -148,7 +149,7 @@ export interface ThreadComposerProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
-  readonly onOpenSideChat?: (() => void) | undefined;
+  readonly onOpenSideChat?: ((message?: string) => Promise<boolean>) | undefined;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
@@ -381,7 +382,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     pullRequestRepository: project?.repositoryIdentity?.displayName ?? null,
     selectedProviderStatus,
     hasThread: true,
-    onOpenSideChat,
     hasCompactableConversation: props.hasCompactableConversation,
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode:
@@ -487,13 +487,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       if (openUsageLimits()) onChangeDraftMessage("");
       return;
     }
-    if (
-      props.draftMessage.trim().toLowerCase() === "/side" &&
-      props.draftAttachments.length === 0
-    ) {
+    const sideCommand = parseComposerSideChatCommand(props.draftMessage);
+    if (sideCommand) {
+      if (!canSend) return;
       if (onOpenSideChat) {
-        onChangeDraftMessage("");
-        onOpenSideChat();
+        const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
+        if (inFlightThreadIdsRef.current.has(threadKey)) return;
+        inFlightThreadIdsRef.current.add(threadKey);
+        try {
+          await onOpenSideChat(sideCommand.message);
+        } finally {
+          inFlightThreadIdsRef.current.delete(threadKey);
+        }
       } else {
         Alert.alert(
           "Side chat unavailable",
@@ -523,6 +528,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       inFlightThreadIdsRef.current.delete(threadKey);
     }
   }, [
+    canSend,
     props.draftMessage,
     props.draftAttachments.length,
     onOpenSideChat,

@@ -1,4 +1,5 @@
 import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
+import { parseComposerSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { filePreviewKind } from "@t3tools/shared/filePreview";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
@@ -128,8 +129,20 @@ export function pullRequestComposerContext(
 
 /** Native editors collapse the canonical source range to a single atomic attachment. */
 export function composerContextEditorTokens(text: string, tokens: readonly ComposerInlineToken[]) {
+  const sideCommand = parseComposerSideChatCommand(text);
   const references = collectComposerContextReferences(text);
   return [
+    ...(sideCommand && sideCommand.rangeEnd < text.length
+      ? [
+          {
+            type: "side-command" as const,
+            value: "Open Side",
+            source: text.slice(sideCommand.rangeStart, sideCommand.rangeEnd),
+            start: sideCommand.rangeStart,
+            end: sideCommand.rangeEnd,
+          },
+        ]
+      : []),
     ...tokens.filter(
       (token) => !references.some((ref) => token.start < ref.end && token.end > ref.start),
     ),

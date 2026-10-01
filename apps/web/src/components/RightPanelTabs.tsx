@@ -126,6 +126,9 @@ interface RightPanelTabsProps {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  onAddSideChat?: (() => void) | undefined;
+  sideChatAvailable?: boolean | undefined;
+  sideChatDisabledReason?: string | null | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -329,6 +332,9 @@ function RightPanelEmptyState(props: {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  onAddSideChat?: (() => void) | undefined;
+  sideChatAvailable?: boolean | undefined;
+  sideChatDisabledReason?: string | null | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -343,6 +349,16 @@ function RightPanelEmptyState(props: {
   const [highlight, setHighlight] = useState(-1);
 
   const actions = [
+    {
+      label: "Side chat",
+      icon: MessageSquare,
+      shortcut: "S",
+      available: props.sideChatAvailable === true,
+      disabledReason:
+        props.sideChatDisabledReason ?? "Complete a turn with a provider that supports forking.",
+      onClick: () => props.onAddSideChat?.(),
+      badgeCount: 0,
+    },
     {
       label: "Browser",
       icon: Globe2,
@@ -879,6 +895,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   }, []);
 
   const addSurfaceActions = [
+    {
+      label: "Side chat",
+      icon: MessageSquare,
+      shortcut: "S",
+      available: props.sideChatAvailable === true,
+      disabledReason:
+        props.sideChatDisabledReason ?? "Complete a turn with a provider that supports forking.",
+      onClick: () => props.onAddSideChat?.(),
+    },
     {
       label: "Browser",
       icon: Globe2,
@@ -1431,6 +1456,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}
+            onAddSideChat={props.onAddSideChat}
+            sideChatAvailable={props.sideChatAvailable}
+            sideChatDisabledReason={props.sideChatDisabledReason}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}

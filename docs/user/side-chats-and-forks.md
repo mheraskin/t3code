@@ -11,8 +11,12 @@ where the new conversation appears:
 Use the fork action on a completed agent response to choose the exact point where the new
 conversation begins. You can also open a side chat or create a fork from the thread menu or command
 palette. Both start from the latest completed response. **Open side chat** defaults to
-`mod+shift+b`. You can also type `/side` in the composer and select it to open a side chat
-from the latest completed response, with the conversation’s context intact. If the conversation cannot be forked yet, selecting the command explains why. **Fork to new thread** has no default shortcut, but you can assign one in
+`mod+shift+b`. On web and desktop, **Side chat** is also available in **Open a surface** and the
+panel tab bar’s **+** menu. Type `/side ` in the composer to choose **Open Side**, then write
+a message and send it to open a side chat and run the message there. Sending `/side` alone opens
+an empty side chat. Both start from the latest completed response, with the conversation’s context
+intact. If the conversation cannot be forked yet, sending the command explains why.
+**Fork to new thread** has no default shortcut, but you can assign one in
 **Settings → Keybindings**.
 
 ## Provider support

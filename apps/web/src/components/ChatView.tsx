@@ -1,4 +1,5 @@
 import { isChatGptUsageLimitError } from "@t3tools/shared/usageLimits";
+import { parseComposerSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -2150,6 +2151,7 @@ function ChatViewContent(props: ChatViewProps) {
     panelHostThreadId: panelHostThreadId ?? activeThreadId,
   });
   const { forkLatest, latest: latestFork } = threadFork;
+  const [sideChatSubmitting, setSideChatSubmitting] = useState(false);
   const openSideChat = useCallback(() => {
     if (!latestFork.enabled) {
       toastManager.add(
@@ -7768,6 +7770,62 @@ function ChatViewContent(props: ChatViewProps) {
 
       return;
     }
+    const sideCommand = !directAnnotation ? parseComposerSideChatCommand(promptForSend) : null;
+    if (sideCommand) {
+      if (!latestFork.enabled) {
+        openSideChat();
+        return;
+      }
+      const sideMessage = {
+        prompt: sideCommand.message,
+        images: [...composerImages],
+        files: [...composerFiles],
+        terminalContexts: [...composerTerminalContexts],
+        previewAnnotations: [...composerPreviewAnnotations],
+        reviewComments: [...composerReviewComments],
+        sendSettings: readComposerSendSettings(sendCtx),
+        queuedAfterToolActivityId: null,
+        createdAt: new Date().toISOString(),
+      };
+      const hasSideMessage =
+        sideCommand.message.length > 0 ||
+        composerImages.length + composerFiles.length > 0 ||
+        sendableComposerTerminalContexts.length > 0 ||
+        composerPreviewAnnotations.length + composerReviewComments.length > 0;
+      if (
+        hasSideMessage &&
+        composerRef.current?.validateProviderInput(
+          applyClaudePromptEffortPrefix(sideCommand.message, sideMessage.sendSettings.promptEffort),
+        ) === false
+      )
+        return;
+      const draftSnapshot = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+      sendInFlightRef.current = true;
+      setSideChatSubmitting(true);
+      try {
+        const sideThreadRef = await forkLatest(true);
+        if (!sideThreadRef) return;
+        if (hasSideMessage) {
+          useQueuedMessageStore.getState().enqueue(scopedThreadKey(sideThreadRef), sideMessage);
+        }
+        if (
+          useComposerDraftStore.getState().getComposerDraft(composerDraftTarget) === draftSnapshot
+        ) {
+          clearComposerDraftContent(composerDraftTarget);
+          if (currentRouteThreadKeyRef.current === routeThreadKey) {
+            promptRef.current = "";
+            composerImagesRef.current = [];
+            composerFilesRef.current = [];
+            composerTerminalContextsRef.current = [];
+            composerRef.current?.resetCursorState();
+          }
+        }
+      } finally {
+        sendInFlightRef.current = false;
+        setSideChatSubmitting(false);
+      }
+      return;
+    }
     if (
       !directAnnotation &&
       sendInteractionModeEnabled &&
@@ -7839,16 +7897,13 @@ function ChatViewContent(props: ChatViewProps) {
       composerReviewComments.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
-    if (standaloneSlashCommand === "side") {
-      if (openSideChat()) {
-        promptRef.current = "";
-        clearComposerDraftContent(composerDraftTarget);
-        composerRef.current?.resetCursorState();
-      }
-      return;
-    }
     // Providers without the legacy toggle receive their native commands unchanged.
-    if (standaloneSlashCommand && sendInteractionModeEnabled && multipleModelSelections === null) {
+    if (
+      standaloneSlashCommand &&
+      standaloneSlashCommand !== "side" &&
+      sendInteractionModeEnabled &&
+      multipleModelSelections === null
+    ) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -10274,7 +10329,7 @@ function ChatViewContent(props: ChatViewProps) {
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
                             isConnecting={isConnecting}
-                            isSendBusy={isSendBusy}
+                            isSendBusy={isSendBusy || sideChatSubmitting}
                             isRevertingCheckpoint={isRevertingCheckpoint}
                             sendDisabledReason={
                               isRevertingCheckpoint
@@ -10560,6 +10615,9 @@ function ChatViewContent(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurface}
           onAddAgents={addAgentsSurface}
           onAddDevice={addDeviceSurface}
+          onAddSideChat={openSideChat}
+          sideChatAvailable={latestFork.enabled}
+          sideChatDisabledReason={latestFork.disabledReason}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
@@ -10618,6 +10676,9 @@ function ChatViewContent(props: ChatViewProps) {
             onAddPullRequests={addPullRequestsSurface}
             onAddAgents={addAgentsSurface}
             onAddDevice={addDeviceSurface}
+            onAddSideChat={openSideChat}
+            sideChatAvailable={latestFork.enabled}
+            sideChatDisabledReason={latestFork.disabledReason}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}

@@ -103,6 +103,17 @@ describe("mobile slash commands", () => {
 });
 
 describe("/side availability", () => {
+  it("does not offer side routing in the middle of a message", () => {
+    expect(
+      buildComposerSlashCommandItems({
+        query: "side",
+        atMessageStart: false,
+        hasThread: true,
+        allowInteractionMode: false,
+        selectedProviderStatus: null,
+      }),
+    ).toEqual([]);
+  });
   it.each([
     { hasThread: true, expected: ["cmd:side"] },
     { hasThread: false, expected: [] },
@@ -111,7 +122,7 @@ describe("/side availability", () => {
       buildComposerSlashCommandItems({
         ...availability,
         query: "side",
-        atMessageStart: false,
+        atMessageStart: true,
         allowInteractionMode: false,
         selectedProviderStatus: null,
       }).map((item) => item.id),

@@ -99,12 +99,12 @@ export function buildComposerSlashCommandItems(input: {
     (item) =>
       item.command.includes(query) &&
       (item.command === "side"
-        ? input.hasThread
+        ? input.hasThread && input.atMessageStart
         : item.command === "model" || allowInteractionMode),
   );
 
-  // Providers expand commands only at the start of a message. T3 commands
-  // change local state and do not have this restriction.
+  // Provider commands and /side require a message prefix. Other T3 commands
+  // change local state and work from any position.
   if (!input.atMessageStart) return items;
   for (const command of input.selectedProviderStatus?.slashCommands ?? []) {
     if (!command.name.toLowerCase().includes(query)) continue;
@@ -186,7 +186,6 @@ export function useComposerCommandMenu({
   onChangeDraftMessage,
   onUpdateInteractionMode,
   onUsageLimits,
-  onOpenSideChat,
 }: {
   readonly draftMessage: string;
   readonly ownerKey: string | null;
@@ -204,7 +203,6 @@ export function useComposerCommandMenu({
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
   /** Picking /usage-limits is the action itself; the draft keeps nothing of it. */
   readonly onUsageLimits?: () => void;
-  readonly onOpenSideChat?: (() => void) | undefined;
 }) {
   const [selection, setSelection] = useState(() => composerSelectionAtEnd(draftMessage));
   const previousOwnerKeyRef = useRef(ownerKey);
@@ -524,15 +522,6 @@ export function useComposerCommandMenu({
         return;
       }
 
-      if (item.type === "slash-command" && item.command === "side") {
-        if (!onOpenSideChat) return;
-        const cleared = replaceTextRange(draftMessage, trigger.rangeStart, trigger.rangeEnd, "");
-        setSelection({ start: cleared.cursor, end: cleared.cursor });
-        onChangeDraftMessage(cleared.text);
-        onOpenSideChat();
-        return;
-      }
-
       if (
         item.type === "provider-slash-command" &&
         item.command.name === USAGE_LIMITS_COMMAND.name &&
@@ -566,7 +555,6 @@ export function useComposerCommandMenu({
       onChangeDraftMessage,
       onUpdateInteractionMode,
       onUsageLimits,
-      onOpenSideChat,
       selectedProviderStatus?.showInteractionModeToggle,
       trigger,
     ],

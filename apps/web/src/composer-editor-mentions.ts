@@ -1,6 +1,7 @@
 import type { AssistantCitation } from "@t3tools/contracts";
 import { collectAssistantCitations } from "@t3tools/shared/assistantCitations";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { parseComposerSideChatCommand } from "@t3tools/shared/composerTrigger";
 import {
   collectComposerInlineTokens,
   type ComposerInlineToken,
@@ -10,6 +11,10 @@ export type ComposerPromptSegment =
   | {
       type: "text";
       text: string;
+    }
+  | {
+      type: "side-command";
+      source: string;
     }
   | {
       type: "mention";
@@ -76,7 +81,20 @@ function forEachMentionMatch(
 }
 
 export function collectComposerPromptInlineTokens(text: string) {
-  const tokens = collectComposerInlineTokens(text);
+  const sideCommand = parseComposerSideChatCommand(text);
+  const tokens = [
+    ...(sideCommand && sideCommand.rangeEnd < text.length
+      ? [
+          {
+            type: "side-command" as const,
+            start: sideCommand.rangeStart,
+            end: sideCommand.rangeEnd,
+            source: text.slice(sideCommand.rangeStart, sideCommand.rangeEnd),
+          },
+        ]
+      : []),
+    ...collectComposerInlineTokens(text),
+  ];
   const citations = collectAssistantCitations(text);
   const references = collectComposerContextReferences(text);
   if (citations.length === 0 && references.length === 0) return tokens;
@@ -111,7 +129,9 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
       pushTextSegment(segments, text.slice(cursor, match.start));
     }
 
-    if (match.type === "citation") {
+    if (match.type === "side-command") {
+      segments.push({ type: "side-command", source: match.source });
+    } else if (match.type === "citation") {
       segments.push({ type: "citation", citation: match.citation, source: match.source });
     } else if (match.type === "context-reference") {
       segments.push({

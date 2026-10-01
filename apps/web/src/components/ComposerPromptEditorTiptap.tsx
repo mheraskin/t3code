@@ -66,6 +66,7 @@ import { getTimelinePageScrollKey } from "./chat/pageScrollController";
 import { ContextChipPopover } from "./contextChipParts";
 import { Button } from "./ui/button";
 import { ContextChip } from "./ContextChip";
+import { ComposerSideChatExtension } from "~/composerSideChatExtension";
 import {
   ComposerContextActionsContext,
   ComposerContextReferenceChip,
@@ -269,6 +270,16 @@ const ComposerSkillExtension = Node.create({
     return ReactNodeViewRenderer(ComposerSkillNodeView);
   },
 });
+
+function ComposerSideChatNodeView() {
+  return (
+    <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
+      <ContextChip contentEditable={false} spellCheck={false} data-composer-side-command-chip>
+        Open Side
+      </ContextChip>
+    </NodeViewWrapper>
+  );
+}
 
 function ComposerSkillNodeView({ node }: NodeViewProps) {
   const actions = use(ComposerContextActionsContext);
@@ -779,6 +790,11 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         }),
         ComposerMentionExtension,
         ComposerSkillExtension,
+        ComposerSideChatExtension.extend({
+          addNodeView() {
+            return ReactNodeViewRenderer(ComposerSideChatNodeView);
+          },
+        }),
         ComposerCitationExtension,
         ComposerContextReferenceExtension,
         ComposerMarkersExtension,

@@ -164,6 +164,19 @@ describe("mobile composer context", () => {
     for (const token of tokens) expect(text.slice(token.start, token.end)).toBe(token.source);
   });
 
+  it("labels a leading side command without consuming the message or other chips", () => {
+    const text = "/side explain [app.ts](src/app.ts) ";
+    const tokens = composerContextEditorTokens(text, collectComposerInlineTokens(text));
+    expect(tokens.map((token) => token.type)).toEqual(["side-command", "mention"]);
+    expect(tokens[0]).toEqual({
+      type: "side-command",
+      value: "Open Side",
+      source: "/side",
+      start: 0,
+      end: 5,
+    });
+  });
+
   it("removes deleted payloads but keeps the screenshot linked to a remaining annotation", () => {
     const context: OrchestrationMessageContext = {
       version: 1,

@@ -22,6 +22,8 @@ import {
   CommandId,
   MessageId,
   DEFAULT_SERVER_SETTINGS,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   EnvironmentId,
   ThreadId,
   TurnId,
@@ -85,6 +87,8 @@ import { useSelectedThreadGitState } from "../../state/use-selected-thread-git-s
 import { useSelectedThreadRequests } from "../../state/use-selected-thread-requests";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
+import { resolveProviderInteractionMode } from "../../state/legacy-plan-mode";
+import { composerContextSendBlockReason } from "../../lib/composerContext";
 import { threadEnvironment } from "../../state/threads";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -767,6 +771,7 @@ function ThreadRouteContent(
           environmentId: String(sourceThread.environmentId),
           threadId: String(nextThreadId),
         });
+        return nextThreadId;
       } finally {
         forkInFlightRef.current = false;
       }
@@ -789,16 +794,79 @@ function ThreadRouteContent(
       selectedThreadDetail?.messages,
     ],
   );
-  const handleOpenSideChat = useCallback(() => {
-    if (!sideChatTarget) {
-      Alert.alert(
-        "Side chat unavailable",
-        "Complete a turn with a provider that supports forking.",
-      );
-      return;
-    }
-    void handleForkAssistantMessage({ ...sideChatTarget, sideChat: true });
-  }, [handleForkAssistantMessage, sideChatTarget]);
+  const handleOpenSideChat = useCallback(
+    async (message?: string) => {
+      if (!sideChatTarget || !selectedThread) {
+        Alert.alert(
+          "Side chat unavailable",
+          "Complete a turn with a provider that supports forking.",
+        );
+        return false;
+      }
+      const sourceKey = scopedThreadKey(selectedThread.environmentId, selectedThread.id);
+      const draft = getComposerDraftSnapshot(sourceKey);
+      const blockedReason =
+        composerContextSendBlockReason(draft.context) ??
+        (draft.attachments.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS
+          ? "Remove attachments before sending."
+          : null) ??
+        ((message?.length ?? 0) > PROVIDER_SEND_TURN_MAX_INPUT_CHARS
+          ? "This message is too long to send."
+          : null);
+      if (message !== undefined && blockedReason) {
+        Alert.alert("Could not send to side chat", blockedReason);
+        return false;
+      }
+      const threadId = await handleForkAssistantMessage({ ...sideChatTarget, sideChat: true });
+      if (!threadId) return false;
+      if (message === undefined) return true;
+      if (
+        message.length > 0 ||
+        draft.attachments.length > 0 ||
+        (draft.context?.records.length ?? 0) > 0
+      ) {
+        const metadata = makeTurnCommandMetadata();
+        try {
+          await enqueueThreadOutboxMessage({
+            environmentId: selectedThread.environmentId,
+            threadId,
+            messageId: MessageId.make(metadata.messageId),
+            commandId: CommandId.make(metadata.commandId),
+            text: message,
+            attachments: draft.attachments,
+            context: draft.context,
+            modelSelection: draft.modelSelection ?? selectedThread.modelSelection,
+            runtimeMode: draft.runtimeMode ?? selectedThread.runtimeMode,
+            interactionMode: resolveProviderInteractionMode(
+              serverConfig?.providers.find(
+                (provider) =>
+                  provider.instanceId ===
+                  (draft.modelSelection ?? selectedThread.modelSelection).instanceId,
+              ),
+              draft.interactionMode ?? selectedThread.interactionMode,
+            ),
+            createdAt: metadata.createdAt,
+          });
+        } catch (error) {
+          Alert.alert(
+            "Could not send to side chat",
+            error instanceof Error ? error.message : String(error),
+          );
+          return false;
+        }
+      }
+      const currentDraft = getComposerDraftSnapshot(sourceKey);
+      if (
+        currentDraft.text === draft.text &&
+        currentDraft.attachments === draft.attachments &&
+        currentDraft.context === draft.context
+      ) {
+        clearComposerDraftContent(sourceKey, { deferAttachmentCleanup: true });
+      }
+      return true;
+    },
+    [handleForkAssistantMessage, selectedThread, serverConfig, sideChatTarget],
+  );
 
   const handlePromoteSideChat = useCallback(async () => {
     if (!selectedThread || selectedThread.sideChat !== true) return;

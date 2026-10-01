@@ -3617,13 +3617,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (item.type === "slash-command") {
         if (item.command === "side") {
           if (!onOpenSideChat) return;
-          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-            focusEditorAfterReplace: false,
+          const replacement = "/side ";
+          const rangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(trigger.rangeStart, rangeEnd, replacement, {
+            expectedText: snapshot.value.slice(trigger.rangeStart, rangeEnd),
           });
           if (applied) {
             setComposerHighlightedItemId(null);
-            onOpenSideChat();
           }
           return;
         }

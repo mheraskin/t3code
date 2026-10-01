@@ -6,6 +6,17 @@ export type ComposerTriggerKind =
   | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default" | "side";
 
+/** A leading /side routes the rest of the prompt to a new side chat. */
+export function parseComposerSideChatCommand(text: string) {
+  const match = /^(\s*)\/side(?=\s|$)/i.exec(text);
+  if (!match) return null;
+  return {
+    rangeStart: match[1]?.length ?? 0,
+    rangeEnd: match[0].length,
+    message: text.slice(match[0].length).trim(),
+  };
+}
+
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
   query: string;

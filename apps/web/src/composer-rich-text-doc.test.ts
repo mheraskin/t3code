@@ -1,5 +1,6 @@
 import { getSchemaByResolvedExtensions, Node, resolveExtensions } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { ComposerSideChatExtension } from "./composerSideChatExtension";
 import { TaskList } from "@tiptap/extension-task-list";
 import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { describe, expect, it } from "vite-plus/test";
@@ -42,6 +43,7 @@ const schema = getSchemaByResolvedExtensions(
       code: false,
     }),
     ComposerCodeExtension,
+    ComposerSideChatExtension,
     stubAtom("composer-mention", { path: { default: "" }, source: { default: "" } }),
     stubAtom("composer-skill", {
       skillName: { default: "" },
@@ -92,6 +94,7 @@ const plainSchema = getSchemaByResolvedExtensions(
       strike: false,
       code: false,
     }),
+    ComposerSideChatExtension,
     stubAtom("composer-mention", { path: { default: "" }, source: { default: "" } }),
     stubAtom("composer-skill", {
       skillName: { default: "" },
@@ -123,6 +126,30 @@ function roundTripPlain(value: string) {
 }
 
 describe("composer rich text document model", () => {
+  it("round-trips the side command chip and keeps the caret after its space", () => {
+    const value = "/side explain **this**";
+    for (const map of [roundTrip(value), roundTripPlain(value)]) {
+      expect(map.value).toBe(value);
+      expect(map.runs[0]).toMatchObject({
+        kind: "token",
+        nodeName: "composer-side-command",
+        mdLen: 5,
+        docLen: 1,
+      });
+      expect(flatToMarkdown(map, 2)).toBe(6);
+      expect(flatToCollapsed(map, 2)).toBe(2);
+    }
+  });
+
+  it.each(["/side", "ask /side please", "hello\n/side explain", "/sidebar hello"])(
+    "keeps %j as ordinary text until a leading /side is followed by whitespace",
+    (value) =>
+      expect(
+        roundTripPlain(value).runs.some(
+          (run) => run.kind === "token" && run.nodeName === "composer-side-command",
+        ),
+      ).toBe(false),
+  );
   it.each(["€", "£", "¥", "₹", "₩", "₿", "𑿝"])(
     "canonicalizes %s skill aliases while preserving amounts",
     (prefix) => {

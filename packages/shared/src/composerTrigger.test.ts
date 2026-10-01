@@ -1,6 +1,37 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { detectComposerTrigger, serializeComposerFileLink } from "./composerTrigger.ts";
+import {
+  detectComposerTrigger,
+  parseComposerSideChatCommand,
+  serializeComposerFileLink,
+} from "./composerTrigger.ts";
+
+describe("parseComposerSideChatCommand", () => {
+  it.each(["/side", "/side ", " /SIDE\n"])("opens an empty side chat for %j", (text) => {
+    expect(parseComposerSideChatCommand(text)?.message).toBe("");
+  });
+
+  it("routes the whole message, including multiline text and other slash commands", () => {
+    const text = "  /SIDE explain this\n/plan next steps  ";
+    const command = parseComposerSideChatCommand(text);
+    expect(command).toEqual({
+      rangeStart: 2,
+      rangeEnd: 7,
+      message: "explain this\n/plan next steps",
+    });
+    expect(text.slice(command?.rangeStart, command?.rangeEnd)).toBe("/SIDE");
+  });
+
+  it.each([
+    "/sidebar hi",
+    "/sideways",
+    "explain /side this",
+    "hello\n/side explain",
+    "`/side hello`",
+  ])("leaves ordinary prompts unchanged: %j", (text) =>
+    expect(parseComposerSideChatCommand(text)).toBeNull(),
+  );
+});
 
 describe("detectComposerTrigger", () => {
   it.each(["$", "€", "£", "¥", "₹", "₩", "₿", "𑿝"])(

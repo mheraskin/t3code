@@ -220,4 +220,18 @@ describe("searchSlashCommandItems", () => {
       "skill:claudeAgent:unslop",
     ]);
   });
+
+  it("offers side chat routing only at the start of the message", () => {
+    const items = [
+      {
+        id: "slash:side",
+        type: "slash-command",
+        command: "side",
+        label: "/side",
+        description: "Open Side",
+      },
+    ] satisfies ComposerCommandItem[];
+    expect(slashCommandItemsForPromptPosition(items, true)).toEqual(items);
+    expect(slashCommandItemsForPromptPosition(items, false)).toEqual([]);
+  });
 });
