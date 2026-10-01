@@ -487,7 +487,7 @@ import {
   shouldRefocusComposerOnWindowFocus,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
-import { runPromoteSideChat } from "../threadForking.logic";
+import { runCloseSideChat, runPromoteSideChat } from "../threadForking.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
@@ -5318,11 +5318,37 @@ function ChatViewContent(props: ChatViewProps) {
       cleanupRightPanelSurfaces(surfaces);
       const store = useRightPanelStore.getState();
       for (const surface of surfaces) {
+        if (surface.kind === "side-chat") {
+          void runCloseSideChat({
+            settle: async () => {
+              const result = await settleThread(
+                scopeThreadRef(activeThreadRef.environmentId, surface.threadId),
+              );
+              if (result._tag === "Success") return true;
+              if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+                const error = squashAtomCommandFailure(result);
+                toastManager.add(
+                  stackedThreadToast({
+                    type: "error",
+                    title: "Could not close side chat",
+                    description: error instanceof Error ? error.message : "An error occurred.",
+                  }),
+                );
+              }
+              return false;
+            },
+            closeSurface: () => {
+              store.closeSurface(activeThreadRef, surface.id);
+              syncActivePreviewSurface();
+            },
+          });
+          continue;
+        }
         store.closeSurface(activeThreadRef, surface.id);
       }
       syncActivePreviewSurface();
     },
-    [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
+    [activeThreadRef, cleanupRightPanelSurfaces, settleThread, syncActivePreviewSurface],
   );
   const closeRightPanelSurface = useCallback(
     (surface: RightPanelSurface) => {

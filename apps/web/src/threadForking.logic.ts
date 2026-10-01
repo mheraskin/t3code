@@ -133,3 +133,12 @@ export async function runPromoteSideChat(input: {
   await input.navigate();
   return true;
 }
+
+export async function runCloseSideChat(input: {
+  readonly settle: () => Promise<boolean>;
+  readonly closeSurface: () => void;
+}): Promise<boolean> {
+  if (!(await input.settle())) return false;
+  input.closeSurface();
+  return true;
+}

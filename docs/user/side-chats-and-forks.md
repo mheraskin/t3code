@@ -33,9 +33,10 @@ responses when the provider can fork only from the latest turn.
 
 ## Managing side chats
 
-Closing a side-chat tab only closes that local panel. The conversation still exists, and you can
-reopen it from **Side chats** in its parent thread's menu. On mobile, the same menu opens each side
-chat as a full-screen thread.
+Closing a side-chat tab settles its thread. The conversation still exists, and you can reopen it
+from **Side chats** in its parent thread's menu. Send a message to make it active again. If the
+thread cannot be settled yet, the tab stays open and explains why. On mobile, the same menu opens
+each side chat as a full-screen thread.
 
 Choose **Promote to thread** to move a side chat into the main thread list. It keeps its
 conversation and its link back to the parent.

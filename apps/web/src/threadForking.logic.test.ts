@@ -1,10 +1,14 @@
-import { MessageId, TurnId } from "@t3tools/contracts";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+import { selectThreadRightPanelState, useRightPanelStore } from "./rightPanelStore";
 
 import {
   canForkCompletedAssistantMessage,
   completedTurnIdsFromCheckpoints,
   resolveForkEntryAvailability,
+  runCloseSideChat,
   runPromoteSideChat,
 } from "./threadForking.logic";
 
@@ -256,5 +260,74 @@ describe("side chat promotion", () => {
     ).resolves.toBe(false);
     expect(closeSurface).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("closing side chats", () => {
+  const host = scopeThreadRef(EnvironmentId.make("env-a"), ThreadId.make("parent"));
+  const childId = ThreadId.make("side-chat");
+  const panel = () => selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, host);
+
+  beforeEach(() => {
+    useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
+    useRightPanelStore.getState().openSideChat(host, childId);
+  });
+
+  it("keeps the conversation open until settlement succeeds, then closes the final tab", async () => {
+    const receipt = Promise.resolve().then(() => true);
+    const closing = runCloseSideChat({
+      settle: () => receipt,
+      closeSurface: () => useRightPanelStore.getState().closeSurface(host, `side-chat:${childId}`),
+    });
+
+    expect(panel().surfaces).toHaveLength(1);
+    expect(panel().isOpen).toBe(true);
+    await expect(closing).resolves.toBe(true);
+    expect(panel().surfaces).toEqual([]);
+    expect(panel().isOpen).toBe(false);
+  });
+
+  it("keeps the side chat and selected tab intact if settlement fails", async () => {
+    const before = panel();
+    await expect(
+      runCloseSideChat({
+        settle: async () => false,
+        closeSurface: () =>
+          useRightPanelStore.getState().closeSurface(host, `side-chat:${childId}`),
+      }),
+    ).resolves.toBe(false);
+    expect(panel()).toBe(before);
+  });
+
+  it("preserves a failed side chat during bulk closure and leaves another environment's tabs open", async () => {
+    const otherHost = scopeThreadRef(EnvironmentId.make("env-b"), host.threadId);
+    const otherChildId = ThreadId.make("other-side-chat");
+    const store = useRightPanelStore.getState();
+    store.openSideChat(host, otherChildId);
+    store.openSideChat(otherHost, childId);
+    store.open(host, "files");
+    const otherPanel = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      otherHost,
+    );
+
+    await Promise.all([
+      runCloseSideChat({
+        settle: async () => false,
+        closeSurface: () => store.closeSurface(host, `side-chat:${childId}`),
+      }),
+      runCloseSideChat({
+        settle: async () => true,
+        closeSurface: () => store.closeSurface(host, `side-chat:${otherChildId}`),
+      }),
+    ]);
+    store.closeSurface(host, "files");
+
+    expect(panel().surfaces.map((surface) => surface.id)).toEqual([`side-chat:${childId}`]);
+    expect(panel().activeSurfaceId).toBe(`side-chat:${childId}`);
+    expect(panel().isOpen).toBe(true);
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, otherHost)).toBe(
+      otherPanel,
+    );
   });
 });
