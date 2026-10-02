@@ -175,6 +175,7 @@ describe("ProviderCommandReactor", () => {
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly sessionFork?: "any-turn" | "latest-turn" | "unsupported";
+    readonly sessionForkLive?: boolean;
     readonly requiresNewThreadForModelChange?: boolean;
     readonly unreadableHistory?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
@@ -425,6 +426,7 @@ describe("ProviderCommandReactor", () => {
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
           sessionFork: input?.sessionFork ?? "any-turn",
+          sessionForkLive: input?.sessionForkLive ?? true,
         }),
       assertConversationRollbackSupported: () => unsupported(),
       getInstanceInfo: (instanceId) => {
@@ -656,6 +658,8 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
+      subscribeDomainEvents: () =>
+        runEffect(engine.subscribeDomainEvents.pipe(Scope.provide(reactorScope))),
       snapshotQuery,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       readPendingTurnStarts: () =>
@@ -1080,6 +1084,231 @@ describe("ProviderCommandReactor", () => {
       });
     }),
   );
+
+  it.each(["any-turn", "latest-turn"] as const)(
+    "captures a running first turn immediately for %s providers and keeps the parent running",
+    async (sessionFork) => {
+      const started = await Effect.runPromise(Deferred.make<void>());
+      const harness = await createHarness({
+        sessionFork,
+        startSessionEffect: (session) =>
+          Deferred.succeed(started, undefined).pipe(Effect.as(session)),
+      });
+      const sourceThreadId = ThreadId.make("thread-1");
+      const forkThreadId = ThreadId.make("thread-live-side-chat");
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-live-source-turn"),
+          threadId: sourceThreadId,
+          message: {
+            messageId: asMessageId("message-live-source"),
+            role: "user",
+            text: "Keep working",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2026-09-03T12:00:00.000Z",
+        }),
+      );
+      await harness.runEffect(Deferred.await(started));
+      await harness.drain();
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-live-source-running"),
+          threadId: sourceThreadId,
+          session: {
+            threadId: sourceThreadId,
+            status: "running",
+            providerName: "codex",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeMode: "approval-required",
+            activeTurnId: asTurnId("turn-1"),
+            lastError: null,
+            updatedAt: "2026-09-03T12:00:00.000Z",
+          },
+          createdAt: "2026-09-03T12:00:00.000Z",
+        }),
+      );
+      expect(
+        (await harness.readModel()).threads.find((thread) => thread.id === sourceThreadId)
+          ?.latestTurn?.state,
+      ).toBe("running");
+      const forkCommand = {
+        type: "thread.fork" as const,
+        commandId: CommandId.make("cmd-live-side-fork"),
+        threadId: forkThreadId,
+        sourceThreadId,
+        sourceHead: true as const,
+        sideChat: true,
+        createdAt: "2026-09-03T12:00:01.000Z",
+      };
+      const forkEvents = await harness.subscribeDomainEvents();
+      const forkReady = harness.runEffect(
+        Stream.runHead(
+          forkEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "thread.session-set" &&
+                event.payload.threadId === forkThreadId &&
+                event.payload.session.status === "ready",
+            ),
+          ),
+        ),
+      );
+      await harness.runEffect(harness.engine.dispatch(forkCommand));
+      await forkReady;
+      await harness.drain();
+      await harness.runEffect(harness.engine.dispatch(forkCommand));
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        threadId: forkThreadId,
+        forkFrom: { threadId: sourceThreadId, sourceHead: true },
+      });
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+      expect(harness.interruptTurn).not.toHaveBeenCalled();
+      expect(harness.stopSession).not.toHaveBeenCalled();
+      expect(
+        (await harness.readModel()).threads.find((thread) => thread.id === sourceThreadId)
+          ?.latestTurn?.state,
+      ).toBe("running");
+      const fork = (await harness.readModel()).threads.find((thread) => thread.id === forkThreadId);
+      expect(fork?.session?.status).toBe("ready");
+      expect(fork?.latestTurn).toBeNull();
+      const binding = await harness.runEffect(harness.getSessionBinding(forkThreadId));
+      expect(binding?.resumeCursor).toEqual({ opaque: "resume-2" });
+      const settledEvents = await harness.subscribeDomainEvents();
+      const stopped = harness.runEffect(
+        Stream.runHead(
+          settledEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "thread.session-set" &&
+                event.payload.threadId === forkThreadId &&
+                event.payload.session.status === "stopped",
+            ),
+          ),
+        ),
+      );
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-live-side-settle"),
+          threadId: forkThreadId,
+        }),
+      );
+      await stopped;
+      await harness.drain();
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: CommandId.make("cmd-live-source-progress"),
+          threadId: sourceThreadId,
+          messageId: asMessageId("message-live-source-progress"),
+          turnId: asTurnId("turn-1"),
+          delta: "More progress after the side chat's snapshot",
+          createdAt: "2026-09-03T12:00:03.000Z",
+        }),
+      );
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-live-side-turn"),
+          threadId: forkThreadId,
+          message: {
+            messageId: asMessageId("message-live-side"),
+            role: "user",
+            text: "Check this progress",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2026-09-03T12:00:02.000Z",
+        }),
+      );
+      await harness.drain();
+      expect(harness.startSession).toHaveBeenCalledTimes(3);
+      expect(harness.startSession.mock.calls[2]?.[1]).toMatchObject({
+        threadId: forkThreadId,
+        resumeCursor: binding?.resumeCursor,
+      });
+      expect(harness.startSession.mock.calls[2]?.[1]).not.toHaveProperty("forkFrom");
+      expect(harness.sendTurn).toHaveBeenCalledTimes(2);
+      expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+        threadId: forkThreadId,
+        input: "Check this progress",
+      });
+    },
+  );
+
+  it("keeps a failed head snapshot from silently forking later source progress on retry", async () => {
+    const forkThreadId = ThreadId.make("thread-live-failed");
+    const harness = await createHarness({
+      startSessionEffect: () =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "codex",
+            method: "thread/fork",
+            detail: "Snapshot failed",
+          }),
+        ),
+    });
+    const events = await harness.subscribeDomainEvents();
+    const failed = harness.runEffect(
+      Stream.runHead(
+        events.pipe(
+          Stream.filter(
+            (event) =>
+              event.type === "thread.session-set" &&
+              event.payload.threadId === forkThreadId &&
+              event.payload.session.status === "error",
+          ),
+        ),
+      ),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("cmd-live-failed-fork"),
+        threadId: forkThreadId,
+        sourceThreadId: ThreadId.make("thread-1"),
+        sourceHead: true,
+        sideChat: true,
+        createdAt: "2026-09-03T12:00:00.000Z",
+      }),
+    );
+    await failed;
+    await harness.drain();
+    expect(
+      (await harness.readModel()).threads.find((thread) => thread.id === forkThreadId)?.session,
+    ).toMatchObject({ status: "error", lastError: expect.stringContaining("Snapshot failed") });
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-live-failed-turn"),
+        threadId: forkThreadId,
+        message: {
+          messageId: asMessageId("message-live-failed"),
+          role: "user",
+          text: "Retry",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-09-03T12:00:01.000Z",
+      }),
+    );
+    await harness.drain();
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(
+      (await harness.readModel()).threads.find((thread) => thread.id === forkThreadId)?.session
+        ?.lastError,
+    ).toContain("current-progress snapshot could not be created");
+  });
 
   it("creates forks without provider work and lazily starts the first turn from lineage", async () => {
     const harness = await createHarness();

@@ -6504,6 +6504,117 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "captures Claude's current transcript before the fork receives its first prompt",
+    () => {
+      const forkCalls: Array<Parameters<NonNullable<ClaudeAdapterLiveOptions["forkSession"]>>> = [];
+      const nativeForkId = "550e8400-e29b-41d4-a716-446655440001";
+      const harness = makeHarness({
+        forkSession: async (...args) => {
+          forkCalls.push(args);
+          return { sessionId: nativeForkId };
+        },
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const sourceSessionId = "550e8400-e29b-41d4-a716-446655440000";
+        const session = yield* adapter.startSession({
+          threadId: ThreadId.make("thread-claude-live-fork"),
+          provider: ProviderDriverKind.make("claudeAgent"),
+          cwd: "/workspace",
+          forkFrom: { resumeCursor: { resume: sourceSessionId }, sourceHead: true },
+          runtimeMode: "full-access",
+        });
+        assert.deepEqual(forkCalls, [[sourceSessionId, { dir: "/workspace" }]]);
+        assert.equal(harness.getLastCreateQueryInput()?.options.resume, nativeForkId);
+        assert.equal(harness.getLastCreateQueryInput()?.options.forkSession, undefined);
+        assert.deepEqual(session.resumeCursor, {
+          threadId: session.threadId,
+          resume: nativeForkId,
+          turnCount: 0,
+          hasInheritedContext: true,
+        });
+        assert.deepEqual(
+          (yield* adapter.listSessions()).map((entry) => entry.threadId),
+          [session.threadId],
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect.each([true, false])(
+    "rewinds the first side-chat turn to its captured context (resumed: %s)",
+    (resumed) => {
+      const forkCalls: Array<Parameters<NonNullable<ClaudeAdapterLiveOptions["forkSession"]>>> = [];
+      const headId = "550e8400-e29b-41d4-a716-446655440001";
+      const rewindId = "550e8400-e29b-41d4-a716-446655440002";
+      let sideTurnId = "";
+      const harness = makeHarness({
+        forkSession: async (...args) => {
+          forkCalls.push(args);
+          return { sessionId: forkCalls.length === 1 ? headId : rewindId };
+        },
+        getSessionMessages: async (sessionId) => [
+          claudeHistoryMessage({
+            type: "user",
+            uuid: sessionId === rewindId ? "fork-inherited-user" : "inherited-user",
+            content: "Original work",
+            sessionId,
+          }),
+          claudeHistoryMessage({
+            type: "assistant",
+            uuid: sessionId === rewindId ? "fork-inherited-progress" : "inherited-progress",
+            content: [{ type: "text", text: "Captured progress" }],
+            sessionId,
+          }),
+          ...(sideTurnId && sessionId !== rewindId
+            ? [
+                claudeHistoryMessage({
+                  type: "user",
+                  uuid: sideTurnId,
+                  content: "Side question",
+                  sessionId,
+                }),
+              ]
+            : []),
+        ],
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const threadId = ThreadId.make("thread-live-fork-rewind");
+        const session = yield* adapter.startSession({
+          threadId,
+          runtimeMode: "full-access",
+          forkFrom: { resumeCursor: { resume: CLAUDE_ORIGINAL_SESSION_ID }, sourceHead: true },
+        });
+        if (resumed) {
+          yield* adapter.stopSession(threadId);
+          yield* adapter.startSession({
+            threadId,
+            runtimeMode: "full-access",
+            resumeCursor: session.resumeCursor,
+          });
+        }
+        const sent = yield* adapter.sendTurn({ threadId, input: "Side question" });
+        sideTurnId = String(sent.turnId);
+        yield* adapter.rollbackThread(threadId, 1);
+        assert.deepEqual(forkCalls, [
+          [CLAUDE_ORIGINAL_SESSION_ID, {}],
+          [headId, { upToMessageId: "inherited-progress" }],
+        ]);
+        assert.equal(harness.getLastCreateQueryInput()?.options.resume, rewindId);
+        assert.equal(harness.getLastCreateQueryInput()?.options.forkSession, undefined);
+        assert.equal((yield* adapter.readThread(threadId)).turns.length, 0);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("forks Claude sessions at the latest boundary into a new durable cursor", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

@@ -95,6 +95,30 @@ const forkCommand = {
 };
 
 it.layer(NodeServices.layer)("thread fork decider", (it) => {
+  it.effect("branches the current head during the first turn without changing the source", () =>
+    Effect.gen(function* () {
+      for (const latestTurnState of ["running", "interrupted", "error", "completed"] as const) {
+        const readModel = makeReadModel({ latestTurnState });
+        const { sourceMessageId: _message, ...headCommand } = forkCommand;
+        const event = yield* decideOrchestrationCommand({
+          command: { ...headCommand, sourceHead: true },
+          readModel,
+        });
+        const created = Array.isArray(event) ? event[0] : event;
+        expect(created?.type).toBe("thread.created");
+        if (created?.type !== "thread.created") return;
+        expect(created.payload.fork).toEqual({
+          sourceThreadId: SOURCE_THREAD_ID,
+          sourceTurnId: null,
+          sourceMessageId: null,
+          sourceHead: true,
+          forkedAt: NOW,
+        });
+        expect(readModel.threads[0]?.latestTurn?.state).toBe(latestTurnState);
+      }
+    }),
+  );
+
   it.effect("inherits source fields and records immutable lineage", () =>
     Effect.gen(function* () {
       const event = yield* decideOrchestrationCommand({
@@ -146,6 +170,16 @@ it.layer(NodeServices.layer)("thread fork decider", (it) => {
         instanceId: ProviderInstanceId.make("codex-live"),
         model: "gpt-5.6-sol",
       });
+    }),
+  );
+
+  it.effect("rejects ambiguous current-head and completed-turn targets", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: { ...forkCommand, sourceHead: true },
+        readModel: makeReadModel(),
+      }).pipe(Effect.flip);
+      expect(error.message).toContain("cannot specify a completed turn or message");
     }),
   );
 

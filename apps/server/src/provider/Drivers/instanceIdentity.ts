@@ -24,5 +24,6 @@ export const withInstanceIdentity =
     ...(input.displayName ? { displayName: input.displayName } : {}),
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     sessionFork: input.adapterCapabilities.sessionFork ?? "unsupported",
+    sessionForkLive: input.adapterCapabilities.sessionForkLive === true,
     continuation: { groupKey: input.continuationGroupKey },
   });

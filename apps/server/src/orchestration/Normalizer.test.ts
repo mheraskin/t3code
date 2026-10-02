@@ -90,6 +90,8 @@ const normalizeFork = (
   sourceTurn: Option.Option<ProjectionThreadTurnState>,
   options?: {
     readonly sessionFork?: "any-turn" | "latest-turn" | "unsupported";
+    readonly sourceHead?: true;
+    readonly sessionForkLive?: boolean;
     /** Capability of the instance the source's live session is bound to, when it differs. */
     readonly liveSessionSessionFork?: "any-turn" | "latest-turn" | "unsupported";
     readonly sourceSessionStatus?: NonNullable<OrchestrationThreadShell["session"]>["status"];
@@ -102,8 +104,7 @@ const normalizeFork = (
     commandId: CommandId.make("command-fork"),
     threadId: ThreadId.make("thread-fork"),
     sourceThreadId,
-    sourceTurnId,
-    sourceMessageId,
+    ...(options?.sourceHead ? { sourceHead: true } : { sourceTurnId, sourceMessageId }),
     sideChat: true,
     createdAt: "2026-09-03T12:00:00.000Z",
   }).pipe(
@@ -143,6 +144,7 @@ const normalizeFork = (
           getCapabilities: (instanceId) =>
             Effect.succeed({
               sessionModelSwitch: "in-session",
+              sessionForkLive: options?.sessionForkLive === true,
               sessionFork:
                 instanceId === liveSourceInstanceId
                   ? (options?.liveSessionSessionFork ?? options?.sessionFork ?? "any-turn")
@@ -213,6 +215,38 @@ describe("canonicalizeClientCommandTimestamps", () => {
 });
 
 describe("normalizeDispatchCommand thread.fork", () => {
+  effectIt.effect(
+    "accepts the current head of the first running turn when the provider supports it",
+    () =>
+      Effect.gen(function* () {
+        const command = yield* normalizeFork(Option.none(), {
+          sourceHead: true,
+          sessionFork: "latest-turn",
+          sessionForkLive: true,
+          latestTurn: {
+            ...makeLatestTurn(sourceTurnId),
+            state: "running",
+            completedAt: null,
+            assistantMessageId: null,
+          },
+        });
+        expect(command).toMatchObject({ type: "thread.fork", sourceHead: true });
+        expect(command).not.toHaveProperty("sourceTurnId");
+        expect(command).not.toHaveProperty("sourceMessageId");
+      }),
+  );
+
+  effectIt.effect(
+    "rejects current-progress forks when the provider does not advertise support",
+    () =>
+      Effect.gen(function* () {
+        const error = yield* normalizeFork(Option.none(), {
+          sourceHead: true,
+          sessionFork: "latest-turn",
+        }).pipe(Effect.flip);
+        expect(error.message).toContain("does not support current-progress forks");
+      }),
+  );
   effectIt.effect("rejects a nonexistent source turn", () =>
     Effect.gen(function* () {
       const error = yield* normalizeFork(Option.none()).pipe(Effect.flip);

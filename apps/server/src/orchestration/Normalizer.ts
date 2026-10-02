@@ -178,11 +178,18 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           );
       if (Option.isSome(sourceThread)) {
         const sourceInstanceId = threadProviderInstanceId(sourceThread.value);
-        if (canonicalCommand.sourceTurnId !== undefined) {
+        if (canonicalCommand.sourceTurnId !== undefined || canonicalCommand.sourceHead) {
           const providerService = yield* ProviderService;
           const capabilities = yield* providerService.getCapabilities(sourceInstanceId);
+          if (canonicalCommand.sourceHead && capabilities.sessionForkLive !== true) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: canonicalCommand.type,
+              detail: `Provider instance '${sourceInstanceId}' does not support current-progress forks.`,
+            });
+          }
           const latestTurn = sourceThread.value.latestTurn;
           if (
+            !canonicalCommand.sourceHead &&
             capabilities.sessionFork === "latest-turn" &&
             (latestTurn?.turnId !== canonicalCommand.sourceTurnId ||
               latestTurn?.state !== "completed")

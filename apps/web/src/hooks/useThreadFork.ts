@@ -29,6 +29,7 @@ import {
   canForkCompletedAssistantMessage,
   completedTurnIdsFromCheckpoints,
   resolveForkEntryAvailability,
+  resolveLatestCompletedForkTarget,
   type ThreadForkTarget,
 } from "../threadForking.logic";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -65,9 +66,11 @@ export function useThreadForkActions(
   const navigate = useNavigate();
   const serverConfigs = useServerConfigs();
   const forkCommand = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
-  const capability = sourceThread
-    ? providerConfigForThread(sourceThread, serverConfigs)?.sessionFork
+  const providerConfig = sourceThread
+    ? providerConfigForThread(sourceThread, serverConfigs)
     : undefined;
+  const capability = providerConfig?.sessionFork;
+  const liveFork = providerConfig?.sessionForkLive === true;
   const completedTurnIds = useMemo(
     () => completedTurnIdsFromCheckpoints(sourceThread?.checkpoints ?? []),
     [sourceThread?.checkpoints],
@@ -76,10 +79,11 @@ export function useThreadForkActions(
     () =>
       resolveForkEntryAvailability({
         capability,
+        liveFork,
         latestTurn: sourceThread?.latestTurn,
         ...(sourceThread ? { messages: sourceThread.messages, completedTurnIds } : {}),
       }),
-    [capability, completedTurnIds, sourceThread],
+    [capability, liveFork, completedTurnIds, sourceThread],
   );
 
   // Callbacks handed to memoized rows must stay identity-stable, so they read
@@ -132,8 +136,9 @@ export function useThreadForkActions(
           input: {
             threadId,
             sourceThreadId: currentSourceThread.id,
-            sourceTurnId: target.turnId,
-            sourceMessageId: target.messageId,
+            ...("sourceHead" in target
+              ? { sourceHead: target.sourceHead }
+              : { sourceTurnId: target.turnId, sourceMessageId: target.messageId }),
             sideChat,
             createdAt: new Date().toISOString(),
           },
@@ -219,7 +224,9 @@ export function useThreadForkActions(
           capability: latestInputsRef.current.capability,
           completed: true,
           messageTurnId: input.turnId,
-          latestCompletedTurnId: latestInputsRef.current.latestTarget?.turnId ?? null,
+          latestCompletedTurnId:
+            resolveLatestCompletedForkTarget(latestInputsRef.current.sourceThread?.latestTurn)
+              ?.turnId ?? null,
           completedTurnIds: latestInputsRef.current.completedTurnIds,
         })
       ) {

@@ -87,6 +87,7 @@ const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 export const codexAdapterCapabilities = {
   sessionModelSwitch: "in-session",
   sessionFork: "any-turn",
+  sessionForkLive: true,
   promptlessTurnContinuation: true,
 } as const;
 

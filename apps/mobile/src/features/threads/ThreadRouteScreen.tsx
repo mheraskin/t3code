@@ -27,6 +27,7 @@ import {
   EnvironmentId,
   ThreadId,
   TurnId,
+  threadProviderInstanceId,
   type ProjectScript,
 } from "@t3tools/contracts";
 import {
@@ -715,21 +716,29 @@ function ThreadRouteContent(
   }, [interruptThreadTurn, selectedThread]);
 
   const handleForkAssistantMessage = useCallback(
-    async (input: {
-      readonly messageId: MessageId;
-      readonly turnId: TurnId;
-      readonly sideChat: boolean;
-    }) => {
+    async (
+      input:
+        | {
+            readonly sourceHead: true;
+            readonly sideChat: boolean;
+          }
+        | {
+            readonly messageId: MessageId;
+            readonly turnId: TurnId;
+            readonly sideChat: boolean;
+          },
+    ) => {
       const sourceThread = forkSourceThreadRef.current;
       if (
         !sourceThread ||
-        !canForkMobileAssistantMessage({
-          capability: forkCapabilityRef.current,
-          completed: true,
-          completedTurnIds: completedForkTurnIdsRef.current,
-          messageTurnId: input.turnId,
-          latestTurn: latestForkTurnRef.current,
-        })
+        (!("sourceHead" in input) &&
+          !canForkMobileAssistantMessage({
+            capability: forkCapabilityRef.current,
+            completed: true,
+            completedTurnIds: completedForkTurnIdsRef.current,
+            messageTurnId: input.turnId,
+            latestTurn: latestForkTurnRef.current,
+          }))
       ) {
         return;
       }
@@ -742,8 +751,9 @@ function ThreadRouteContent(
           input: {
             threadId: nextThreadId,
             sourceThreadId: sourceThread.id,
-            sourceTurnId: input.turnId,
-            sourceMessageId: input.messageId,
+            ...("sourceHead" in input
+              ? { sourceHead: input.sourceHead }
+              : { sourceTurnId: input.turnId, sourceMessageId: input.messageId }),
             sideChat: input.sideChat,
             createdAt: new Date().toISOString(),
           },
@@ -783,6 +793,11 @@ function ThreadRouteContent(
     () =>
       resolveMobileSideChatTarget({
         capability: forkCapability,
+        liveFork: selectedThread
+          ? serverConfig?.providers.find(
+              (provider) => provider.instanceId === threadProviderInstanceId(selectedThread),
+            )?.sessionForkLive === true
+          : false,
         latestTurn: selectedThread?.latestTurn,
         messages: selectedThreadDetail?.messages ?? [],
         completedTurnIds: completedForkTurnIds,
@@ -790,8 +805,9 @@ function ThreadRouteContent(
     [
       completedForkTurnIds,
       forkCapability,
-      selectedThread?.latestTurn,
+      selectedThread,
       selectedThreadDetail?.messages,
+      serverConfig,
     ],
   );
   const handleOpenSideChat = useCallback(
@@ -799,7 +815,7 @@ function ThreadRouteContent(
       if (!sideChatTarget || !selectedThread) {
         Alert.alert(
           "Side chat unavailable",
-          "Complete a turn with a provider that supports forking.",
+          "Start a conversation with a provider that supports forking.",
         );
         return false;
       }

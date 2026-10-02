@@ -22,6 +22,29 @@ const completedTurn = {
 };
 
 describe("thread fork entry availability", () => {
+  it.each(["running", "interrupted", "error", "completed"] as const)(
+    "forks the current progress of a live-fork provider whose latest turn is %s",
+    (state) => {
+      expect(
+        resolveForkEntryAvailability({
+          capability: "latest-turn",
+          liveFork: true,
+          latestTurn: {
+            ...completedTurn,
+            state,
+            completedAt: state === "completed" ? completedTurn.completedAt : null,
+          },
+        }),
+      ).toEqual({ enabled: true, target: { sourceHead: true }, disabledReason: null });
+    },
+  );
+
+  it("does not offer a current-progress fork before the source has started", () => {
+    expect(
+      resolveForkEntryAvailability({ capability: "any-turn", liveFork: true, latestTurn: null }),
+    ).toMatchObject({ enabled: false, disabledReason: "Start this conversation before forking." });
+  });
+
   it("treats missing and unsupported provider capabilities as unavailable", () => {
     expect(
       resolveForkEntryAvailability({ capability: undefined, latestTurn: completedTurn }),

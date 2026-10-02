@@ -487,7 +487,11 @@ import {
   shouldRefocusComposerOnWindowFocus,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
-import { runCloseSideChat, runPromoteSideChat } from "../threadForking.logic";
+import {
+  resolveLatestCompletedForkTarget,
+  runCloseSideChat,
+  runPromoteSideChat,
+} from "../threadForking.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
@@ -10245,7 +10249,9 @@ function ChatViewContent(props: ChatViewProps) {
                 )}
                 onRemoveQueuedMessage={onRemoveQueuedMessage}
                 forkCapability={threadFork.capability}
-                latestCompletedTurnId={threadFork.latest.target?.turnId ?? null}
+                latestCompletedTurnId={
+                  resolveLatestCompletedForkTarget(activeThread?.latestTurn)?.turnId ?? null
+                }
                 forkCompletedTurnIds={threadFork.completedTurnIds}
                 onForkAssistantMessage={
                   paintOnlyDisplayedTimeline ? undefined : threadFork.onForkAssistantMessage

@@ -9,10 +9,11 @@ import type {
 
 export type ForkCapability = ServerProviderSessionFork | undefined;
 
-export interface ThreadForkTarget {
+export interface CompletedThreadForkTarget {
   readonly turnId: TurnId;
   readonly messageId: MessageId;
 }
+export type ThreadForkTarget = CompletedThreadForkTarget | { readonly sourceHead: true };
 
 export function completedTurnIdsFromCheckpoints(
   checkpoints: ReadonlyArray<Pick<OrchestrationCheckpointSummary, "status" | "turnId">>,
@@ -26,7 +27,7 @@ export function completedTurnIdsFromCheckpoints(
 
 export function resolveLatestCompletedForkTarget(
   latestTurn: OrchestrationLatestTurn | null | undefined,
-): ThreadForkTarget | null {
+): CompletedThreadForkTarget | null {
   if (
     latestTurn?.state !== "completed" ||
     latestTurn.completedAt === null ||
@@ -44,7 +45,7 @@ function resolveLatestCompletedMessageTarget(
   messages: ReadonlyArray<Pick<OrchestrationMessage, "id" | "role" | "streaming" | "turnId">>,
   excludedTurnId: TurnId,
   completedTurnIds: ReadonlySet<TurnId>,
-): ThreadForkTarget | null {
+): CompletedThreadForkTarget | null {
   const message = messages.findLast(
     (candidate) =>
       candidate.role === "assistant" &&
@@ -58,6 +59,7 @@ function resolveLatestCompletedMessageTarget(
 
 export function resolveForkEntryAvailability(input: {
   readonly capability: ForkCapability;
+  readonly liveFork?: boolean;
   readonly latestTurn: OrchestrationLatestTurn | null | undefined;
   readonly messages?: ReadonlyArray<
     Pick<OrchestrationMessage, "id" | "role" | "streaming" | "turnId">
@@ -75,6 +77,9 @@ export function resolveForkEntryAvailability(input: {
       target: latestTarget,
       disabledReason: "The active provider does not support forking.",
     };
+  }
+  if (input.liveFork && input.latestTurn != null) {
+    return { enabled: true, target: { sourceHead: true }, disabledReason: null };
   }
   const target =
     latestTarget ??
@@ -101,7 +106,9 @@ export function resolveForkEntryAvailability(input: {
       target: null,
       disabledReason: earlierTurnUnknown
         ? "Open this thread to fork an earlier response."
-        : "Complete a turn before forking this thread.",
+        : input.liveFork
+          ? "Start this conversation before forking."
+          : "Complete a turn before forking this thread.",
     };
   }
   return { enabled: true, target, disabledReason: null };

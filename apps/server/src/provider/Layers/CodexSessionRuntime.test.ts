@@ -995,47 +995,51 @@ describe("openCodexThread", () => {
     }),
   );
 
-  it.effect("forks through the requested turn without passing ephemeral", () =>
-    Effect.gen(function* () {
-      const calls: Array<{ method: "thread/start" | "thread/fork"; payload: unknown }> = [];
-      const opened = yield* openCodexThread({
-        client: {
-          raw: { request: () => Effect.die("Forking must not resume the source thread") },
-          request: <M extends "thread/start" | "thread/fork">(
-            method: M,
-            payload: CodexRpc.ClientRequestParamsByMethod[M],
-          ) => {
-            calls.push({ method, payload });
-            return Effect.succeed(
-              makeThreadOpenResponse("forked-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
-            );
+  it.effect.each([true, false])(
+    "forks the head (%s) or requested completed turn without passing ephemeral",
+    (sourceHead) =>
+      Effect.gen(function* () {
+        const calls: Array<{ method: "thread/start" | "thread/fork"; payload: unknown }> = [];
+        const opened = yield* openCodexThread({
+          client: {
+            raw: { request: () => Effect.die("Forking must not resume the source thread") },
+            request: <M extends "thread/start" | "thread/fork">(
+              method: M,
+              payload: CodexRpc.ClientRequestParamsByMethod[M],
+            ) => {
+              calls.push({ method, payload });
+              return Effect.succeed(
+                makeThreadOpenResponse(
+                  "forked-thread",
+                ) as CodexRpc.ClientRequestResponsesByMethod[M],
+              );
+            },
           },
-        },
-        threadId: ThreadId.make("thread-fork"),
-        runtimeMode: "full-access",
-        cwd: "/tmp/project",
-        requestedModel: "gpt-5.6-sol",
-        serviceTier: undefined,
-        resumeThreadId: undefined,
-        forkFrom: {
-          threadId: "provider-source-thread",
-          turnId: TurnId.make("provider-turn-1"),
-        },
-      });
+          threadId: ThreadId.make("thread-fork"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/project",
+          requestedModel: "gpt-5.6-sol",
+          serviceTier: undefined,
+          resumeThreadId: undefined,
+          forkFrom: {
+            threadId: "provider-source-thread",
+            ...(sourceHead ? {} : { turnId: TurnId.make("provider-turn-1") }),
+          },
+        });
 
-      NodeAssert.equal(opened.thread.id, "forked-thread");
-      NodeAssert.equal(calls[0]?.method, "thread/fork");
-      NodeAssert.deepStrictEqual(calls[0]?.payload, {
-        threadId: "provider-source-thread",
-        lastTurnId: TurnId.make("provider-turn-1"),
-        cwd: "/tmp/project",
-        model: "gpt-5.6-sol",
-        approvalPolicy: "never",
-        approvalsReviewer: "user",
-        sandbox: "danger-full-access",
-      });
-      NodeAssert.equal("ephemeral" in (calls[0]!.payload as object), false);
-    }),
+        NodeAssert.equal(opened.thread.id, "forked-thread");
+        NodeAssert.equal(calls[0]?.method, "thread/fork");
+        NodeAssert.deepStrictEqual(calls[0]?.payload, {
+          threadId: "provider-source-thread",
+          ...(sourceHead ? {} : { lastTurnId: TurnId.make("provider-turn-1") }),
+          cwd: "/tmp/project",
+          model: "gpt-5.6-sol",
+          approvalPolicy: "never",
+          approvalsReviewer: "user",
+          sandbox: "danger-full-access",
+        });
+        NodeAssert.equal("ephemeral" in (calls[0]!.payload as object), false);
+      }),
   );
 
   it.effect("does not fall back when thread/fork fails", () =>

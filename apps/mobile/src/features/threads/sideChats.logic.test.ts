@@ -27,6 +27,27 @@ const latestTurn = {
   assistantMessageId: MessageId.make("message-2"),
 };
 
+describe("mobile current-progress forks", () => {
+  it.each(["running", "interrupted", "error", "completed"] as const)(
+    "branches the current head while the latest turn is %s",
+    (state) => {
+      expect(
+        resolveMobileSideChatTarget({
+          capability: "latest-turn",
+          liveFork: true,
+          latestTurn: {
+            ...latestTurn,
+            state,
+            completedAt: state === "completed" ? latestTurn.completedAt : null,
+          },
+          messages: [],
+          completedTurnIds: new Set(),
+        }),
+      ).toEqual({ sourceHead: true });
+    },
+  );
+});
+
 describe("mobile side-chat list helpers", () => {
   it("hides side chats whose parent is still known", () => {
     const parentId = ThreadId.make("main");

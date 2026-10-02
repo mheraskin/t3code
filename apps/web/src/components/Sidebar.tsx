@@ -4447,12 +4447,13 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
         const providerInstanceId = threadProviderInstanceId(thread);
-        const forkCapability = serverConfigs
+        const forkProvider = serverConfigs
           .get(thread.environmentId)
-          ?.providers.find((provider) => provider.instanceId === providerInstanceId)?.sessionFork;
+          ?.providers.find((provider) => provider.instanceId === providerInstanceId);
         const threadDetail = readThreadDetail(threadRef);
         const forkEntry = resolveForkEntryAvailability({
-          capability: forkCapability,
+          capability: forkProvider?.sessionFork,
+          liveFork: forkProvider?.sessionForkLive === true,
           latestTurn: thread.latestTurn,
           ...(threadDetail
             ? {

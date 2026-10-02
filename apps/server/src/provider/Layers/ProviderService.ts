@@ -1539,6 +1539,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               `Provider '${resolvedProvider}' does not support session forks.`,
             );
           }
+          if (input.forkFrom.sourceHead && adapter.capabilities.sessionForkLive !== true) {
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              `Provider '${resolvedProvider}' does not support current-progress forks.`,
+            );
+          }
           const sourceBinding = Option.getOrUndefined(
             yield* directory.getBinding(input.forkFrom.threadId),
           );
@@ -1564,6 +1570,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }
           effectiveForkFrom = {
             resumeCursor: sourceResumeCursor,
+            ...(input.forkFrom.sourceHead ? { sourceHead: true } : {}),
             ...(input.forkFrom.turnId !== undefined ? { turnId: input.forkFrom.turnId } : {}),
           };
         }

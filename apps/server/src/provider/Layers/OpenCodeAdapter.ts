@@ -4087,6 +4087,7 @@ export function makeOpenCodeAdapter(
       capabilities: {
         sessionModelSwitch: "in-session",
         sessionFork: "latest-turn",
+        sessionForkLive: true,
       },
       startSession,
       sendTurn,

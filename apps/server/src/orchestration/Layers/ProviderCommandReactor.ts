@@ -79,6 +79,7 @@ type ProviderIntentEvent = Extract<
   OrchestrationEvent,
   {
     type:
+      | "thread.created"
       | "thread.meta-updated"
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
@@ -600,6 +601,7 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      readonly captureForkHead?: boolean;
       // First-turn prompt seed. A manual title that still equals this seed was
       // written by the client's auto-title, not a user rename.
       readonly titleSeed?: string;
@@ -616,6 +618,16 @@ const make = Effect.gen(function* () {
       thread.fork == null ? null : yield* providerService.getSessionBinding(threadId);
     const forkResumeCursor = forkBinding?.resumeCursor ?? undefined;
     const forkHasOwnResumeCursor = forkResumeCursor !== undefined;
+    if (thread.fork?.sourceHead && !forkHasOwnResumeCursor && !options?.captureForkHead) {
+      return yield* new ProviderAdapterRequestError({
+        provider: providerErrorLabelFromInstanceHint({
+          instanceId: String(thread.modelSelection.instanceId),
+        }),
+        method: "thread.turn.start",
+        detail:
+          "The current-progress snapshot could not be created. Open a new side chat or fork to capture the source's current progress.",
+      });
+    }
     const forkSource =
       thread.fork != null && !forkHasOwnResumeCursor
         ? yield* resolveThreadShell(thread.fork.sourceThreadId)
@@ -898,7 +910,7 @@ const make = Effect.gen(function* () {
     let latestTurnFork: typeof thread.fork = null;
     if (thread.fork != null && !forkHasOwnResumeCursor) {
       providerCapabilities = yield* providerService.getCapabilities(desiredInstanceId);
-      if (providerCapabilities.sessionFork === "latest-turn") {
+      if (providerCapabilities.sessionFork === "latest-turn" && !thread.fork.sourceHead) {
         latestTurnFork = thread.fork;
       }
     }
@@ -1009,6 +1021,7 @@ const make = Effect.gen(function* () {
           : {
               forkFrom: {
                 threadId: thread.fork.sourceThreadId,
+                ...(thread.fork.sourceHead ? { sourceHead: true as const } : {}),
                 ...(thread.fork.sourceTurnId !== null ? { turnId: thread.fork.sourceTurnId } : {}),
               },
             },
@@ -1994,6 +2007,30 @@ const make = Effect.gen(function* () {
       eventType: event.type,
     });
     switch (event.type) {
+      case "thread.created": {
+        if (!event.payload.fork?.sourceHead) return;
+        yield* ensureSessionForThread(event.payload.threadId, event.occurredAt, {
+          captureForkHead: true,
+        }).pipe(
+          Effect.catch((error) =>
+            setThreadSession({
+              threadId: event.payload.threadId,
+              session: {
+                threadId: event.payload.threadId,
+                status: "error",
+                providerName: null,
+                providerInstanceId: event.payload.modelSelection.instanceId,
+                runtimeMode: event.payload.runtimeMode,
+                activeTurnId: null,
+                lastError: error.message,
+                updatedAt: event.occurredAt,
+              },
+              createdAt: event.occurredAt,
+            }),
+          ),
+        );
+        return;
+      }
       case "thread.meta-updated":
         if (event.payload.regenerateTitle) yield* threadTitleRegenerationWorker.enqueue(event);
         else if (event.payload.titleState?.needsRefinement)
@@ -2099,6 +2136,7 @@ const make = Effect.gen(function* () {
     );
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
+        (event.type === "thread.created" && event.payload.fork?.sourceHead === true) ||
         (event.type === "thread.meta-updated" &&
           (event.payload.regenerateTitle === true ||
             event.payload.titleState?.needsRefinement === true)) ||

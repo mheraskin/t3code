@@ -26,7 +26,11 @@ it("surfaces session fork capability on provider snapshots", () => {
     displayName: undefined,
     accentColor: undefined,
     continuationGroupKey: "codex:test",
-    adapterCapabilities: { sessionModelSwitch: "in-session", sessionFork: "any-turn" },
+    adapterCapabilities: {
+      sessionModelSwitch: "in-session",
+      sessionFork: "any-turn",
+      sessionForkLive: true,
+    },
   })(
     buildServerProvider({
       driver: driverKind,
@@ -44,6 +48,7 @@ it("surfaces session fork capability on provider snapshots", () => {
   );
 
   expect(snapshot.sessionFork).toBe("any-turn");
+  expect(snapshot.sessionForkLive).toBe(true);
 });
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({

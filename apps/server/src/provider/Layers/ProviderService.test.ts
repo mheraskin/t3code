@@ -275,6 +275,7 @@ function makeFakeCodexAdapter(
     provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      sessionForkLive: provider === CODEX_DRIVER || provider === CLAUDE_AGENT_DRIVER,
       ...(supportsConversationRollback !== undefined ? { supportsConversationRollback } : {}),
       sessionFork:
         provider === CODEX_DRIVER
@@ -1674,8 +1675,14 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: CODEX_DRIVER,
         providerInstanceId: codexInstanceId,
         threadId: forkThreadId,
-        forkFrom: { threadId: sourceThreadId },
+        forkFrom: { threadId: sourceThreadId, sourceHead: true },
         runtimeMode: "full-access",
+      });
+      assert.deepEqual(routing.codex.startSession.mock.calls.at(-1)?.[0]?.forkFrom, {
+        resumeCursor: (yield* provider.listSessions()).find(
+          (session) => session.threadId === sourceThreadId,
+        )?.resumeCursor,
+        sourceHead: true,
       });
       routing.codex.startSession.mockClear();
 
@@ -1683,7 +1690,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: CODEX_DRIVER,
         providerInstanceId: codexInstanceId,
         threadId: forkThreadId,
-        forkFrom: { threadId: sourceThreadId },
+        forkFrom: { threadId: sourceThreadId, sourceHead: true },
         runtimeMode: "full-access",
       });
 

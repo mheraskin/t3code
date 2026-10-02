@@ -31,6 +31,7 @@ export type ProviderSessionForkMode = "any-turn" | "latest-turn" | "unsupported"
 export interface ProviderAdapterSessionForkInput {
   readonly resumeCursor: unknown;
   readonly turnId?: TurnId;
+  readonly sourceHead?: true;
 }
 
 export type ProviderAdapterSessionStartInput = Omit<ProviderSessionStartInput, "forkFrom"> & {
@@ -64,6 +65,8 @@ export interface ProviderAdapterCapabilities {
    * forks outright. Omitted means unsupported.
    */
   readonly sessionFork?: ProviderSessionForkMode;
+  /** Copies current progress without waiting for or interrupting the source turn. */
+  readonly sessionForkLive?: boolean;
   /** Starts a resumed turn with no synthetic user prompt. Omitted means the
       adapter needs an explicit continuation instruction. */
   readonly promptlessTurnContinuation?: boolean;

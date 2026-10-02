@@ -816,6 +816,7 @@ export const ThreadForkOrigin = Schema.Struct({
   sourceThreadId: ThreadId,
   sourceTurnId: Schema.NullOr(TurnId),
   sourceMessageId: Schema.NullOr(MessageId),
+  sourceHead: Schema.optional(Schema.Literal(true)),
   forkedAt: IsoDateTime,
 });
 export type ThreadForkOrigin = typeof ThreadForkOrigin.Type;
@@ -1179,6 +1180,7 @@ const ThreadForkCommandFields = {
   sourceThreadId: ThreadId,
   sourceTurnId: Schema.optional(TurnId),
   sourceMessageId: Schema.optional(MessageId),
+  sourceHead: Schema.optional(Schema.Literal(true)),
   sideChat: Schema.Boolean,
   title: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,

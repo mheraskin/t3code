@@ -10,12 +10,14 @@ where the new conversation appears:
 
 Use the fork action on a completed agent response to choose the exact point where the new
 conversation begins. You can also open a side chat or create a fork from the thread menu or command
-palette. Both start from the latest completed response. **Open side chat** defaults to
+palette. Both capture the conversation's current progress, including a running turn, when the
+provider supports it. The original conversation keeps running. **Open side chat** defaults to
 `mod+shift+b`. On web and desktop, **Side chat** is also available in **Open a surface** and the
 panel tab bar’s **+** menu. Type `/side ` in the composer to choose **Open Side**, then write
 a message and send it to open a side chat and run the message there. Sending `/side` alone opens
-an empty side chat. Both start from the latest completed response, with the conversation’s context
-intact. If the conversation cannot be forked yet, sending the command explains why.
+an empty side chat. Its context is captured when it opens, so later progress in the original
+conversation does not change it. If the conversation cannot be forked yet, sending the command
+explains why.
 **Fork to new thread** has no default shortcut, but you can assign one in
 **Settings → Keybindings**.
 
@@ -23,13 +25,15 @@ intact. If the conversation cannot be forked yet, sending the command explains w
 
 Forking follows the active provider's session capabilities:
 
-- Codex can fork from any completed agent response.
-- Claude and OpenCode can fork only from the latest completed agent response.
+- Codex, Claude, and OpenCode can fork their current progress without finishing a turn.
+- Codex also supports choosing any completed agent response as the fork point.
+- Claude and OpenCode support choosing only the latest completed agent response.
 - Cursor, Grok, and Antigravity do not support session forking.
 
-When a provider does not support forking, or the thread has no completed turn, the thread-menu and
-command-palette actions remain visible but unavailable. T3 Code hides the fork action on earlier
-responses when the provider can fork only from the latest turn.
+Start the original conversation before creating a side chat or fork. Unsupported providers keep
+the thread-menu and command-palette actions visible but unavailable. Connections to older servers
+use completed responses as fork points. T3 Code hides the fork action on earlier responses when
+the provider can fork only from the latest turn.
 
 ## Managing side chats
 

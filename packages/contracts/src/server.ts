@@ -228,6 +228,7 @@ export const ServerProvider = Schema.Struct({
   reportsContextWindow: Schema.optional(Schema.Boolean),
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   sessionFork: Schema.optional(ServerProviderSessionFork),
+  sessionForkLive: Schema.optional(Schema.Boolean),
   supportsConversationRollback: Schema.optional(Schema.Boolean),
   supportsTextGeneration: Schema.optional(Schema.Boolean),
   setup: Schema.optional(

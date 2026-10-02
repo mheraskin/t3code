@@ -26,7 +26,7 @@ export function visibleTopLevelThreads<
 /** The capability lookup reads nothing but each provider's id and fork support. */
 export interface ForkCapabilityConfig {
   readonly providers: ReadonlyArray<
-    Pick<ServerConfig["providers"][number], "instanceId" | "sessionFork">
+    Pick<ServerConfig["providers"][number], "instanceId" | "sessionFork" | "sessionForkLive">
   >;
 }
 
@@ -86,9 +86,10 @@ export function canForkMobileAssistantMessage(input: {
   return input.capability === "latest-turn" && input.messageTurnId === latestCompletedTurnId;
 }
 
-/** Pick the same completed response that the side-chat action can fork. */
+/** Capture current progress when supported, otherwise pick a completed response. */
 export function resolveMobileSideChatTarget(input: {
   readonly capability: ServerProviderSessionFork | undefined;
+  readonly liveFork?: boolean;
   readonly latestTurn: OrchestrationLatestTurn | null | undefined;
   readonly messages: ReadonlyArray<
     Pick<OrchestrationMessage, "id" | "role" | "streaming" | "turnId">
@@ -97,6 +98,7 @@ export function resolveMobileSideChatTarget(input: {
 }) {
   if (input.capability === undefined || input.capability === "unsupported") return null;
   const latest = input.latestTurn;
+  if (input.liveFork && latest != null) return { sourceHead: true as const };
   if (resolveMobileLatestCompletedTurnId(latest) && latest?.assistantMessageId) {
     return { turnId: latest.turnId, messageId: latest.assistantMessageId };
   }

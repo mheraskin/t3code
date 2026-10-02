@@ -64,6 +64,7 @@ export const ProviderSessionStartInput = Schema.Struct({
     Schema.Struct({
       threadId: ThreadId,
       turnId: Schema.optional(TurnId),
+      sourceHead: Schema.optional(Schema.Literal(true)),
     }),
   ),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),

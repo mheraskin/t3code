@@ -426,12 +426,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       yield* requireThreadAbsent({ readModel, command, threadId: command.threadId });
 
       const latestTurn = source.latestTurn;
+      if (
+        command.sourceHead &&
+        (command.sourceTurnId !== undefined || command.sourceMessageId !== undefined)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A current-progress fork cannot specify a completed turn or message.",
+        });
+      }
       const sourceTurnIsLatest =
         command.sourceTurnId !== undefined && latestTurn?.turnId === command.sourceTurnId;
       const sourceMessageTargetsLatest =
         command.sourceMessageId !== undefined &&
         (command.sourceTurnId === undefined || sourceTurnIsLatest);
       if (
+        !command.sourceHead &&
         command.sourceTurnId === undefined &&
         latestTurn !== null &&
         latestTurn.state !== "completed"
@@ -496,8 +506,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: source.worktreePath,
           fork: {
             sourceThreadId: source.id,
-            sourceTurnId: command.sourceTurnId ?? latestTurn?.turnId ?? null,
+            sourceTurnId: command.sourceHead
+              ? null
+              : (command.sourceTurnId ?? latestTurn?.turnId ?? null),
             sourceMessageId: command.sourceMessageId ?? null,
+            ...(command.sourceHead ? { sourceHead: true as const } : {}),
             forkedAt: command.createdAt,
           },
           sideChat: command.sideChat,
