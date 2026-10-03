@@ -36,7 +36,7 @@ See [images and videos](#images-and-videos-in-messages) for previewing and savin
 
 Use **Side conversation**, **Open side conversation** in the command palette, or
 send `/side` (also `/btw`) to ask a follow-up beside your main thread. Add a question
-after the command to put it in the side conversation’s draft. **Ask about this
+after the command to open the side conversation and send it immediately. **Ask about this
 response** starts from a specific response.
 
 A new side conversation uses context through a completed turn. If the main agent

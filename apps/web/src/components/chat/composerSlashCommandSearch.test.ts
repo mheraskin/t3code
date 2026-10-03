@@ -10,6 +10,22 @@ import {
 describe("searchSlashCommandItems", () => {
   const claudeDriver = ProviderDriverKind.make("claudeAgent");
 
+  it("offers /side only where it can route the whole question", () => {
+    const items = [
+      {
+        id: "slash:side",
+        type: "slash-command",
+        command: "side",
+        label: "/side",
+        description: "Ask in a side conversation",
+      },
+    ] satisfies Array<Extract<ComposerCommandItem, { type: "slash-command" }>>;
+    expect(searchSlashCommandItems(slashCommandItemsForPromptPosition(items, true), "si")).toEqual(
+      items,
+    );
+    expect(slashCommandItemsForPromptPosition(items, false)).toEqual([]);
+  });
+
   it("moves exact provider command matches ahead of broader description matches", () => {
     const items = [
       {

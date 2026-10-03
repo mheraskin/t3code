@@ -1,4 +1,4 @@
-import { newThreadId } from "../lib/utils";
+import { newMessageId, newThreadId } from "../lib/utils";
 import { useCallback, useRef, useState } from "react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { latestStableSideConversationRun } from "@t3tools/client-runtime/state/side-conversations";
@@ -9,6 +9,7 @@ import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useRightPanelStore } from "../rightPanelStore";
+import { toastManager } from "../components/ui/toast";
 
 export function useSideConversation(ownerRef: ScopedThreadRef) {
   const { environmentId, threadId: ownerThreadId } = ownerRef;
@@ -20,7 +21,9 @@ export function useSideConversation(ownerRef: ScopedThreadRef) {
     configs.get(ownerRef.environmentId)?.environment.capabilities.threadSideConversations === true;
   const stableRun = latestStableSideConversationRun(projection);
   const stableRunId = stableRun?.id;
+  const interactionMode = projection?.thread.interactionMode ?? "default";
   const fork = useAtomCommand(threadEnvironment.forkFromRun, { reportFailure: false });
+  const start = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const [creating, setCreating] = useState(false);
   const inFlight = useRef(false);
   const create = useCallback(
@@ -52,6 +55,34 @@ export function useSideConversation(ownerRef: ScopedThreadRef) {
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         // Preserve the question even if the shell stream has not caught up yet.
         useComposerDraftStore.getState().setPrompt(ref, question);
+        if (question.trim()) {
+          try {
+            const result = await start({
+              environmentId,
+              input: {
+                threadId,
+                message: {
+                  messageId: newMessageId(),
+                  role: "user",
+                  text: question.trim(),
+                  attachments: [],
+                },
+                runtimeMode: "approval-required",
+                interactionMode,
+                dispatchMode: "start",
+              },
+            });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+            if (useComposerDraftStore.getState().getComposerDraft(ref)?.prompt === question)
+              useComposerDraftStore.getState().setPrompt(ref, "");
+          } catch (error) {
+            toastManager.add({
+              type: "error",
+              title: "Side conversation opened, but the question was not sent",
+              description: `${error instanceof Error ? error.message : "The action failed."} Your question is saved in its draft.`,
+            });
+          }
+        }
         useRightPanelStore.getState().openSideConversation(sourceRef, threadId);
         return ref;
       } finally {
@@ -59,7 +90,7 @@ export function useSideConversation(ownerRef: ScopedThreadRef) {
         setCreating(false);
       }
     },
-    [connected, environmentId, ownerThreadId, stableRunId, supported],
+    [connected, environmentId, ownerThreadId, stableRunId, supported, interactionMode],
   );
   return {
     create,

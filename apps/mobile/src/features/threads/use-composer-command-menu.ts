@@ -59,8 +59,8 @@ export function buildComposerSlashCommandItems(input: {
   readonly atMessageStart: boolean;
   readonly hasThread: boolean;
   readonly hasCompactableConversation?: boolean;
-  /** Whether T3 itself offers /usage-limits for the selected provider. */
   readonly offersSideConversations?: boolean;
+  /** Whether T3 itself offers /usage-limits for the selected provider. */
   readonly offersUsageLimits?: boolean;
   readonly allowInteractionMode: boolean;
   readonly selectedProviderStatus: Pick<
@@ -72,7 +72,7 @@ export function buildComposerSlashCommandItems(input: {
   const allowInteractionMode =
     input.allowInteractionMode && input.selectedProviderStatus?.showInteractionModeToggle !== false;
   const builtIn = [
-    ...(input.offersSideConversations && input.hasThread
+    ...(input.offersSideConversations && input.hasThread && input.atMessageStart
       ? [
           {
             id: "cmd:side",
@@ -211,8 +211,8 @@ export function useComposerCommandMenu({
   readonly selectedProviderStatus: ServerProvider | null;
   readonly hasThread: boolean;
   readonly hasCompactableConversation: boolean;
-  /** Whether T3 itself offers /usage-limits for the selected provider. */
   readonly offersSideConversations?: boolean;
+  /** Whether T3 itself offers /usage-limits for the selected provider. */
   readonly offersUsageLimits?: boolean;
   readonly enabled?: boolean;
   readonly onChangeDraftMessage: (value: string) => void;
@@ -361,7 +361,7 @@ export function useComposerCommandMenu({
       const visibleSkills = getProviderSkillsForSlashMenu(skills, true);
       const commandItems = buildComposerSlashCommandItems({
         query: q,
-        atMessageStart: trigger.rangeStart === 0,
+        atMessageStart: draftMessage.slice(0, trigger.rangeStart).trim() === "",
         hasThread,
         hasCompactableConversation,
         offersUsageLimits,
