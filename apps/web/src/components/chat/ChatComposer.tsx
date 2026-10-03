@@ -97,7 +97,7 @@ import {
   makeComposerMentionDragHandlers,
 } from "./composerMentionDrag";
 import {
-  composerFloatingLayerProps,
+  useComposerFloatingLayerProps,
   useComposerMenuProps,
   isInsideCollapsedComposerControls,
   isInsideRestingComposerControlScope,
@@ -990,6 +990,7 @@ function composerCommandMenuPositionsEqual(
 }
 
 function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
+  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
 
   useLayoutEffect(() => {
@@ -1055,6 +1056,7 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   return createPortal(
     <div
       className="pointer-events-auto fixed z-40 flex flex-col"
+      {...composerFloatingLayerProps}
       data-composer-drawer-layer="true"
       style={{
         bottom: position.bottom,
@@ -1496,6 +1498,7 @@ export interface ChatComposerHandle {
 // --------------------------------------------------------------------------
 
 export interface ChatComposerProps {
+  ownsEvent: (event: Event) => boolean;
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   attachmentUploadsCapabilityKnown: boolean;
@@ -1783,6 +1786,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
+  const composerFloatingLayerProps = useComposerFloatingLayerProps();
+  const { ownsEvent } = props;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   // Opening a running thread resyncs for a few frames. Show the sync row, and
@@ -2428,9 +2433,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const onBlur = () => {
       pasteAsTextShortcutUntilRef.current = 0;
     };
-    const onDesktopPasteAsText = () => {
+    const onDesktopPasteAsText = (event: Event) => {
+      if (!ownsEvent(event)) return;
       const activeElement = document.activeElement;
-      if (activeElement?.closest('[data-side-conversation="true"]')) return;
       const blocksPasteToFocus =
         activeElement instanceof Element &&
         activeElement.closest(
@@ -2451,7 +2456,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("blur", onBlur);
     };
-  }, []);
+  }, [ownsEvent]);
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -5592,11 +5597,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (
-        event.target instanceof Element &&
-        event.target.closest('[data-side-conversation="true"]')
-      )
-        return;
+      if (!ownsEvent(event)) return;
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: getTerminalFocusOwner() !== null,
@@ -5624,6 +5625,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
+    ownsEvent,
     activePendingProgress,
     isComposerApprovalState,
     isComposerModelPickerOpen,

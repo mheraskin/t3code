@@ -23,7 +23,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { AssistantCitationCommentEditor } from "./AssistantCitationCommentEditor";
 import { resolveAssistantCitationCommentDismissal } from "./assistantCitationCommentDismissal";
 import { observeAssistantCitationCommentSource } from "./AssistantCitationSource";
-import { composerFloatingLayerProps } from "./composerEventScope";
+import { useComposerFloatingLayerProps } from "./composerEventScope";
 
 export function AssistantCitationChip({
   citation,
@@ -43,6 +43,7 @@ export function AssistantCitationChip({
     onRestoreFocus?: () => void;
   };
 }) {
+  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const navigate = useNavigate();
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const commentPopupRef = useRef<HTMLDivElement>(null);

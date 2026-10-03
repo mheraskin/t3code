@@ -8,7 +8,7 @@ import { EllipsisIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { composerFloatingLayerProps } from "./composerEventScope";
+import { useComposerFloatingLayerProps } from "./composerEventScope";
 
 interface ComposerPendingApprovalActionsProps {
   requestId: RuntimeRequestId;
@@ -35,6 +35,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   options = DEFAULT_APPROVAL_OPTIONS,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
+  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const primaryOptions = options.filter(
     (option) => option.decision === "decline" || option.decision === "accept",
   );
