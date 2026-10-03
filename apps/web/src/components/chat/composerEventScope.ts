@@ -1,4 +1,23 @@
 import { useComposerHandleContext } from "../../composerHandleContext";
+import { createContext, use } from "react";
+
+export const ChatOwnerContext = createContext<string | null>(null);
+
+export function useComposerFloatingLayerProps() {
+  const owner = use(ChatOwnerContext);
+  return { ...composerFloatingLayerProps, "data-chat-owner": owner ?? undefined };
+}
+
+/** The nearest chat owns input, including its menus rendered outside the chat column. */
+export function chatOwnsEvent(event: Event, owner: string, fallbackOwner: boolean): boolean {
+  for (const target of event.composedPath()) {
+    if (!(target instanceof Element)) continue;
+    const scope = target.closest("[data-chat-owner]");
+    if (scope) return scope.getAttribute("data-chat-owner") === owner;
+  }
+  const scope = document.activeElement?.closest("[data-chat-owner]");
+  return scope ? scope.getAttribute("data-chat-owner") === owner : fallbackOwner;
+}
 
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-composer-drawer-layer="true"]',
@@ -11,12 +30,18 @@ export const composerFloatingLayerProps = {
 
 export function useComposerMenuProps() {
   const composerRef = useComposerHandleContext();
+  const floatingLayerProps = useComposerFloatingLayerProps();
 
   return {
-    ...composerFloatingLayerProps,
+    ...floatingLayerProps,
     finalFocus: composerRef
       ? () => {
           const activeElement = document.activeElement;
+          const owner = floatingLayerProps["data-chat-owner"];
+          const focusedOwner = activeElement
+            ?.closest("[data-chat-owner]")
+            ?.getAttribute("data-chat-owner");
+          if (owner && focusedOwner && owner !== focusedOwner) return false;
           if (activeElement !== document.body && !isInsideComposerFloatingLayer(activeElement)) {
             return false;
           }

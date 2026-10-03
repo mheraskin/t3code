@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ComposerHandleContext, type ComposerHandleRef } from "../../composerHandleContext";
 import {
+  ChatOwnerContext,
   isInsideCollapsedComposerControls,
   isInsideComposerFloatingLayer,
   isInsideRestingComposerControlScope,
@@ -11,9 +12,17 @@ import {
 } from "./composerEventScope";
 
 class FakeElement {
-  constructor(private readonly matchingSelector: string | null) {}
+  constructor(
+    private readonly matchingSelector: string | null,
+    private readonly owner: string | null = null,
+  ) {}
+
+  getAttribute(name: string): string | null {
+    return name === "data-chat-owner" ? this.owner : null;
+  }
 
   closest(selector: string): FakeElement | null {
+    if (selector === "[data-chat-owner]" && this.owner) return this;
     return this.matchingSelector !== null &&
       selector.split(",").some((candidate) => candidate === this.matchingSelector)
       ? this
@@ -59,6 +68,45 @@ describe("composer menu focus", () => {
       await act(() => renderer.unmount());
     }
   });
+  it.each(["parent", "child"])(
+    "does not steal focus from a %s menu when another chat closes its menu",
+    async (focusedOwner) => {
+      const body = new FakeElement(null);
+      const activeElement = new FakeElement(
+        '[data-chat-composer-floating-layer="true"]',
+        focusedOwner,
+      );
+      const document = { body, activeElement };
+      const focus = vi.fn();
+      const composerRef = { current: { focusAtEnd: focus } } as unknown as ComposerHandleRef;
+      vi.stubGlobal("Element", FakeElement);
+      vi.stubGlobal("document", document);
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      let finalFocus: ReturnType<typeof useComposerMenuProps>["finalFocus"];
+      function Probe() {
+        const props = useComposerMenuProps();
+        useLayoutEffect(() => {
+          finalFocus = props.finalFocus;
+        }, [props]);
+        return null;
+      }
+      const renderer = await act(() =>
+        create(
+          createElement(
+            ChatOwnerContext,
+            { value: "child" },
+            createElement(ComposerHandleContext, { value: composerRef }, createElement(Probe)),
+          ),
+        ),
+      );
+      try {
+        expect(finalFocus?.()).toBe(false);
+        expect(focus).toHaveBeenCalledTimes(focusedOwner === "child" ? 1 : 0);
+      } finally {
+        await act(() => renderer.unmount());
+      }
+    },
+  );
 });
 
 describe("composer event scopes", () => {

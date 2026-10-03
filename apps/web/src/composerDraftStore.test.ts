@@ -1912,6 +1912,45 @@ describe("composerDraftStore modelSelection", () => {
     resetComposerDraftStore();
   });
 
+  it("keeps a side conversation's model, reasoning, modes, and draft separate from its parent", () => {
+    const sideRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("side-conversation"));
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "Parent work in progress");
+    store.setModelSelection(
+      threadRef,
+      modelSelection(CODEX_DRIVER, "gpt-5.4", { reasoningEffort: "high" }),
+      { explicit: true },
+    );
+    store.setRuntimeMode(threadRef, "full-access");
+    store.setInteractionMode(threadRef, "default");
+    const parentDraft = store.getComposerDraft(threadRef);
+
+    store.setPrompt(sideRef, "A separate follow-up");
+    store.setModelSelection(sideRef, modelSelection(CODEX_DRIVER, "gpt-5.3-codex"), {
+      explicit: true,
+    });
+    store.setProviderModelOptions(
+      sideRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "xhigh" }),
+      { persistSticky: true },
+    );
+    store.setRuntimeMode(sideRef, "approval-required");
+    store.setInteractionMode(sideRef, "plan");
+
+    expect(useComposerDraftStore.getState().getComposerDraft(threadRef)).toEqual(parentDraft);
+    expect(useComposerDraftStore.getState().getComposerDraft(sideRef)).toMatchObject({
+      prompt: "A separate follow-up",
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+      modelSelectionByProvider: {
+        [CODEX_INSTANCE]: modelSelection(CODEX_DRIVER, "gpt-5.3-codex", {
+          reasoningEffort: "xhigh",
+        }),
+      },
+    });
+  });
+
   it("stores a model selection in the draft", () => {
     const store = useComposerDraftStore.getState();
     store.setModelSelection(

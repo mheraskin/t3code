@@ -24,7 +24,7 @@ import {
 } from "./SnapShotAttachmentDetails";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ZoomableImage, type ZoomableImageHandle } from "./ZoomableImage";
-import { composerFloatingLayerProps } from "./composerEventScope";
+import { useComposerFloatingLayerProps } from "./composerEventScope";
 
 interface ExpandedImageDialogProps {
   preview: ExpandedImagePreview;
@@ -71,6 +71,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   preview,
   onClose,
 }: ExpandedImageDialogProps) {
+  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const [imageOffset, setImageOffset] = useState(0);
   const [failedImageSrc, setFailedImageSrc] = useState<string | null>(null);
   const [accessibilityDetailsSrc, setAccessibilityDetailsSrc] = useState<string | null>(null);
