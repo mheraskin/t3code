@@ -2,6 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
+import * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
@@ -60,7 +62,7 @@ describe("fork migration reconciliation", () => {
           SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
         `;
         assert.deepStrictEqual(
-          ledger.map((row) => [row.migration_id, row.name]),
+          ledger.map((row) => [row.migration_id, row.name] as const),
           migrationManifest,
         );
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -104,6 +106,41 @@ describe("fork migration reconciliation", () => {
         [],
       );
       yield* sql`DROP TRIGGER fail_fork_upgrade`;
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [55, "OrchestrationV2"],
+        [56, "RemoveRedundantProjectionIndexes"],
+      ]);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("reports invalid project JSON as a migration failure and retries after repair", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedFork(55);
+      yield* sql`
+        INSERT INTO projection_projects
+          (project_id, title, workspace_root, scripts_json, created_at, updated_at)
+        VALUES ('invalid-json', 'Project', '/tmp/project', '{broken', '2026-09-01', '2026-09-01')
+      `;
+      const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
+      const error = yield* Effect.flip(runMigrations());
+      assert.instanceOf(error, Migrator.MigrationError);
+      assert.deepInclude(error, {
+        kind: "Failed",
+        message: 'Migration "55_OrchestrationV2" failed',
+      });
+      if (error._tag === "MigrationError") {
+        assert.instanceOf(error.cause, Schema.SchemaError);
+      }
+      assert.deepStrictEqual(
+        yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
+        history,
+      );
+      assert.deepStrictEqual(
+        yield* sql`SELECT name FROM sqlite_master WHERE name IN ('orchestration_v2_legacy_imports', 't3_fork_migration_history')`,
+        [],
+      );
+      yield* sql`UPDATE projection_projects SET scripts_json = '[]' WHERE project_id = 'invalid-json'`;
       assert.deepStrictEqual(yield* runMigrations(), [
         [55, "OrchestrationV2"],
         [56, "RemoveRedundantProjectionIndexes"],

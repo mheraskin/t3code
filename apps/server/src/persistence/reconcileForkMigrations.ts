@@ -130,7 +130,21 @@ export const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(func
           VALUES (${row.migration_id}, ${row.name}, ${row.created_at})
           ON CONFLICT (migration_id, name) DO NOTHING
         `;
-        yield* replacement[3];
+        if (replacement[0] === 55) {
+          yield* replacement[3].pipe(
+            Effect.catchTag(
+              "SchemaError",
+              (cause) =>
+                new Migrator.MigrationError({
+                  kind: "Failed",
+                  message: `Migration "${replacement[0]}_${replacement[2]}" failed`,
+                  cause,
+                }),
+            ),
+          );
+        } else {
+          yield* replacement[3];
+        }
         yield* sql`
           UPDATE effect_sql_migrations SET name = ${replacement[2]}
           WHERE migration_id = ${row.migration_id} AND name = ${row.name}

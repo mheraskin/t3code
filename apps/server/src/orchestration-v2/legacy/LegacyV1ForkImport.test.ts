@@ -1,8 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
-import { EventId, ThreadId } from "@t3tools/contracts";
+import {
+  ChatAttachment,
+  ChatImageAttachment,
+  EventId,
+  MessageId,
+  OrchestrationV2LegacyForkOrigin,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -26,11 +35,14 @@ const TestLayer = Layer.mergeAll(
 );
 
 const source = (sourceThreadId: string, sourceMessageId: string | null = null) => ({
-  sourceThreadId,
+  sourceThreadId: ThreadId.make(sourceThreadId),
   sourceTurnId: null,
-  sourceMessageId,
+  sourceMessageId: sourceMessageId === null ? null : MessageId.make(sourceMessageId),
   forkedAt: "2026-01-03T00:00:00.000Z",
 });
+const encodeFork = Schema.encodeSync(Schema.fromJsonString(OrchestrationV2LegacyForkOrigin));
+const encodeAttachments = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ChatAttachment)));
+const encodeInvalidFork = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const seed = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -81,29 +93,29 @@ describe("legacy fork import", () => {
         const origin = source("parent", "parent-message");
         yield* insertThread({
           id: "side",
-          forkJson: JSON.stringify(origin),
+          forkJson: encodeFork(origin),
           sideChat: true,
           filedUnder: "filed-parent",
         });
         yield* insertThread({
           id: "nested-side",
-          forkJson: JSON.stringify({ ...source("side"), sourceHead: true }),
+          forkJson: encodeFork({ ...source("side"), sourceHead: true }),
           sideChat: true,
         });
-        const attachment = {
+        const attachment = ChatImageAttachment.make({
           type: "image",
           id: "att-1",
           name: "shot.png",
           mimeType: "image/png",
           sizeBytes: 1234,
-        };
+        });
         yield* sql`
         INSERT INTO projection_thread_messages
           (message_id, thread_id, role, text, attachments_json, is_streaming, created_at, updated_at)
         VALUES
           ('parent-message', 'parent', 'assistant', 'Source answer', '[]', 0,
            '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z'),
-          ('side-first', 'side', 'user', 'First question', ${JSON.stringify([attachment])}, 0,
+          ('side-first', 'side', 'user', 'First question', ${encodeAttachments([attachment])}, 0,
            '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
           ('side-next', 'side', 'user', 'Follow-up', '[]', 0,
            '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z'),
@@ -112,13 +124,16 @@ describe("legacy fork import", () => {
       `;
         assert.equal((yield* importer.reconcileShells).importedThreadCount, 4);
         const side = yield* projections.getThreadProjection(ThreadId.make("side"));
-        assert.deepStrictEqual(side.thread.presentation, { kind: "side", ownerThreadId: "parent" });
+        assert.deepStrictEqual(side.thread.presentation, {
+          kind: "side",
+          ownerThreadId: ThreadId.make("parent"),
+        });
         assert.equal(side.thread.filedUnderThreadId, "filed-parent");
         assert.deepStrictEqual(side.thread.legacyFork, origin);
         assert.deepStrictEqual(side.thread.lineage, {
-          parentThreadId: "parent",
+          parentThreadId: ThreadId.make("parent"),
           relationshipToParent: "fork",
-          rootThreadId: "parent",
+          rootThreadId: ThreadId.make("parent"),
         });
         assert.isNull(side.thread.forkedFrom);
         assert.isEmpty(side.runs);
@@ -156,33 +171,33 @@ describe("legacy fork import", () => {
       yield* insertThread({ id: "malformed", forkJson: "{broken", sideChat: true });
       yield* insertThread({
         id: "invalid-schema",
-        forkJson: JSON.stringify({ ...source("parent"), sourceHead: false }),
+        forkJson: encodeInvalidFork({ ...source("parent"), sourceHead: false }),
         sideChat: true,
       });
       yield* insertThread({
         id: "orphan",
-        forkJson: JSON.stringify(source("missing")),
+        forkJson: encodeFork(source("missing")),
         sideChat: true,
       });
       yield* insertThread({
         id: "cross-project",
-        forkJson: JSON.stringify(source("other")),
+        forkJson: encodeFork(source("other")),
         sideChat: true,
         filedUnder: "other",
       });
       yield* insertThread({
         id: "mismatched-message",
-        forkJson: JSON.stringify(source("parent", "other-message")),
+        forkJson: encodeFork(source("parent", "other-message")),
         sideChat: true,
       });
       yield* insertThread({
         id: "mismatched-turn",
-        forkJson: JSON.stringify({ ...source("parent"), sourceTurnId: "other-turn" }),
+        forkJson: encodeFork({ ...source("parent"), sourceTurnId: TurnId.make("other-turn") }),
         sideChat: true,
       });
       yield* insertThread({
         id: "shared-turn",
-        forkJson: JSON.stringify({ ...source("parent"), sourceTurnId: "shared-turn-id" }),
+        forkJson: encodeFork({ ...source("parent"), sourceTurnId: TurnId.make("shared-turn-id") }),
         sideChat: true,
       });
       yield* sql`
@@ -200,13 +215,13 @@ describe("legacy fork import", () => {
       `;
       yield* insertThread({
         id: "cycle-a",
-        forkJson: JSON.stringify(source("cycle-b")),
+        forkJson: encodeFork(source("cycle-b")),
         sideChat: true,
         filedUnder: "cycle-b",
       });
       yield* insertThread({
         id: "cycle-b",
-        forkJson: JSON.stringify(source("cycle-a")),
+        forkJson: encodeFork(source("cycle-a")),
         sideChat: true,
         filedUnder: "cycle-a",
       });
@@ -226,7 +241,7 @@ describe("legacy fork import", () => {
         assert.deepStrictEqual(projection.thread.lineage, {
           parentThreadId: null,
           relationshipToParent: null,
-          rootThreadId: id,
+          rootThreadId: ThreadId.make(id),
         });
         assert.isNull(projection.thread.filedUnderThreadId);
         assert.isEmpty(projection.runs);
@@ -242,7 +257,7 @@ describe("legacy fork import", () => {
       );
       assert.deepStrictEqual(
         (yield* projections.getThreadProjection(ThreadId.make("shared-turn"))).thread.presentation,
-        { kind: "side", ownerThreadId: "parent" },
+        { kind: "side", ownerThreadId: ThreadId.make("parent") },
       );
       assert.deepStrictEqual(yield* importer.reconcileShells, {
         importedThreadCount: 0,
@@ -264,7 +279,7 @@ describe("legacy fork import", () => {
         yield* insertThread({ id: "parent" });
         yield* insertThread({
           id: "side",
-          forkJson: JSON.stringify(source("parent")),
+          forkJson: encodeFork(source("parent")),
           sideChat: true,
           filedUnder: "parent",
         });
@@ -280,7 +295,7 @@ describe("legacy fork import", () => {
         const repaired = yield* projections.getThreadProjection(ThreadId.make("side"));
         assert.deepStrictEqual(repaired.thread.presentation, {
           kind: "side",
-          ownerThreadId: "parent",
+          ownerThreadId: ThreadId.make("parent"),
         });
         assert.equal(repaired.thread.lineage.rootThreadId, "parent");
         const changed = {

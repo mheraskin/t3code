@@ -2273,7 +2273,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           });
         }
         visited.add(parentId);
-        const parent = yield* projectionStore.getThread(parentId).pipe(mapDispatchError(command));
+        const parent: OrchestrationV2AppThread = yield* projectionStore
+          .getThread(parentId)
+          .pipe(mapDispatchError(command));
         if (parent.projectId !== thread.projectId || parent.deletedAt !== null) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
