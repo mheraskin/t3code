@@ -1537,6 +1537,7 @@ export interface ChatComposerProps {
   bannerItems: readonly ComposerBannerStackItem[];
   /** Picking /usage-limits from the menu is the action itself; the draft keeps nothing of it. */
   onUsageLimitsCommand?: (() => void) | undefined;
+  offersSideConversations: boolean;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -2476,6 +2477,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Derived: composer trigger / menu
   // ------------------------------------------------------------------
   const composerTriggerKind = composerTrigger?.kind ?? null;
+  const slashCommandAtPromptStart =
+    composerTrigger?.kind === "slash-command" &&
+    prompt.slice(0, composerTrigger.rangeStart).trim() === "";
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const pullRequestTriggerQuery =
     composerTrigger?.kind === "pull-request" ? composerTrigger.query : "";
@@ -2592,6 +2596,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
+        ...(props.offersSideConversations
+          ? [
+              {
+                id: "slash:side",
+                type: "slash-command",
+                command: "side",
+                label: "/side",
+                description: "Ask in a side conversation",
+              } as const,
+            ]
+          : []),
         {
           id: "slash:model",
           type: "slash-command",
@@ -2650,7 +2665,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
-        composerTrigger.rangeStart === 0,
+        slashCommandAtPromptStart,
       );
       return searchSlashCommandItems(slashCommandItems, query);
     }
@@ -2727,6 +2742,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     environmentThreadShells,
     exactPullRequestLookup.data,
     planModeUiEnabled,
+    props.offersSideConversations,
+    slashCommandAtPromptStart,
     pullRequestLookup.data,
     pullRequestProjectId,
     pullRequestRepository,
@@ -3892,6 +3909,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "side") {
+          if (!props.offersSideConversations) return;
+          const replacement = "/side ";
+          const rangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(trigger.rangeStart, rangeEnd, replacement, {
+            expectedText: snapshot.value.slice(trigger.rangeStart, rangeEnd),
+          });
+          if (applied) setComposerHighlightedItemId(null);
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -4024,6 +4055,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       handleInteractionModeChange,
       planModeUiEnabled,
       onUsageLimitsCommand,
+      props.offersSideConversations,
       resolveActiveComposerTrigger,
     ],
   );

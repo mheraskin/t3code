@@ -1,4 +1,5 @@
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
+import { parseComposerSideConversationCommand } from "@t3tools/shared/composerTrigger";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useAtomValue } from "@effect/atom-react";
@@ -494,7 +495,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     pullRequestRepository: project?.repositoryIdentity?.displayName ?? null,
     selectedProviderStatus,
     hasThread: true,
-    offersSideConversations: props.onOpenSideConversation !== undefined,
+    offersSideConversations: props.onOpenSideConversation !== undefined && queuedEdit === null,
     hasCompactableConversation: props.hasCompactableConversation,
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode:
@@ -602,7 +603,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         if (openUsageLimits()) onChangeDraftMessage("");
         return;
       }
-      if (props.onOpenSideConversation && /^\/side(?:\s|$)/i.test(props.draftMessage.trim())) {
+      const sideQuestion =
+        queuedEdit === null ? parseComposerSideConversationCommand(props.draftMessage) : null;
+      if (sideQuestion) {
+        if (!props.onOpenSideConversation) {
+          Alert.alert(
+            "Side conversations unavailable",
+            "Update this environment's server to use side conversations.",
+          );
+          return;
+        }
         if (props.draftAttachments.length > 0) {
           Alert.alert(
             "Attachments stay in this draft",
@@ -610,10 +620,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           );
           return;
         }
-        const draft = props.draftMessage.trim().replace(/^\/side\s*/i, "");
         const sourceText = props.draftMessage;
         if (
-          (await props.onOpenSideConversation(draft)) &&
+          (await props.onOpenSideConversation(sideQuestion.message)) &&
           getComposerDraftSnapshot(composerDraftKey).text === sourceText
         ) {
           onChangeDraftMessage("");
@@ -643,6 +652,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     },
     [
       props.draftMessage,
+      queuedEdit,
       composerDraftKey,
       props.onOpenSideConversation,
       props.draftAttachments.length,

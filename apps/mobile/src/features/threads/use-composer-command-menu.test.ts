@@ -38,6 +38,17 @@ describe("mobile slash commands", () => {
     expect(buildComposerSlashCommandItems({ ...input, offersSideConversations: false })).toEqual(
       [],
     );
+    expect(buildComposerSlashCommandItems({ ...input, atMessageStart: false })).toEqual([]);
+    const side = buildComposerSlashCommandItems(input)[0];
+    if (!side) throw new Error("Expected /side");
+    expect(
+      resolveComposerCommandSelection({
+        draftMessage: "/si",
+        trigger: { rangeStart: 0, rangeEnd: 3 },
+        item: side,
+        allowInteractionMode: false,
+      }),
+    ).toEqual({ text: "/side ", cursor: 6, interactionMode: null });
   });
   const antigravity = {
     driver: ProviderDriverKind.make("antigravity"),

@@ -1,5 +1,7 @@
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import type { AssistantCitation, ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type { ComposerSlashCommand } from "@t3tools/shared/composerTrigger";
+export type { ComposerSlashCommand } from "@t3tools/shared/composerTrigger";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
@@ -12,7 +14,6 @@ import {
 import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {
@@ -305,7 +306,7 @@ export function composerStateAtPromptEnd(text: string): {
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+): Exclude<ComposerSlashCommand, "model" | "side"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;

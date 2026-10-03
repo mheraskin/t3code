@@ -4,7 +4,13 @@ export type ComposerTriggerKind =
   | "slash-command"
   | "slash-model"
   | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "side";
+
+/** A leading /side routes the rest of the prompt to a side conversation. */
+export function parseComposerSideConversationCommand(text: string) {
+  const match = /^\s*\/(?:side|btw)(?=\s|$)/i.exec(text);
+  return match ? { message: text.slice(match[0].length).trim() } : null;
+}
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;

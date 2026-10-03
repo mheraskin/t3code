@@ -26,10 +26,14 @@ const testState = vi.hoisted(() => ({
   drafts: new Map<string, string>(),
   opened: [] as Array<{ owner: ScopedThreadRef; childId: ThreadId }>,
   fork: vi.fn<(input: unknown) => Promise<AtomCommandResult<void, Error>>>(),
+  start: vi.fn<(input: unknown) => Promise<AtomCommandResult<void, Error>>>(),
+  notify: vi.fn(),
 }));
 
 vi.mock("../state/entities", () => ({
-  useThreadProjection: () => ({ projection: { runs: testState.runs } }),
+  useThreadProjection: () => ({
+    projection: { runs: testState.runs, thread: { interactionMode: "default" } },
+  }),
   useServerConfigs: () =>
     new Map([
       [
@@ -39,13 +43,19 @@ vi.mock("../state/entities", () => ({
     ]),
 }));
 vi.mock("../state/threads", () => ({
-  threadEnvironment: { forkFromRun: "fork" },
+  threadEnvironment: { forkFromRun: "fork", startTurn: "start" },
   useEnvironmentThread: () => ({ status: testState.status }),
 }));
-vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => testState.fork }));
+vi.mock("../state/use-atom-command", () => ({
+  useAtomCommand: (command: string) => (command === "fork" ? testState.fork : testState.start),
+}));
+vi.mock("../components/ui/toast", () => ({ toastManager: { add: testState.notify } }));
 vi.mock("../composerDraftStore", () => ({
   useComposerDraftStore: {
     getState: () => ({
+      getComposerDraft: (ref: ScopedThreadRef) => ({
+        prompt: testState.drafts.get(scopedThreadKey(ref)) ?? "",
+      }),
       setPrompt: (ref: ScopedThreadRef, prompt: string) =>
         testState.drafts.set(scopedThreadKey(ref), prompt),
     }),
@@ -105,6 +115,8 @@ beforeEach(() => {
   testState.drafts.clear();
   testState.opened.length = 0;
   testState.fork.mockReset().mockResolvedValue(AsyncResult.success(undefined));
+  testState.start.mockReset().mockResolvedValue(AsyncResult.success(undefined));
+  testState.notify.mockReset();
   testState.drafts.set(scopedThreadKey(ownerRef), "parent work in progress");
   act(() => {
     renderer = create(<Probe owner={ownerRef} />);
@@ -117,6 +129,21 @@ afterEach(() => {
 });
 
 describe("side conversation creation", () => {
+  it("sends the question as the child's first turn instead of leaving it unsent", async () => {
+    await act(async () => {
+      const child = await controller.create("Explain this change");
+      if (child === null) throw new Error("Expected a committed child");
+      expect(testState.start).toHaveBeenCalledWith({
+        environmentId,
+        input: expect.objectContaining({
+          threadId: child.threadId,
+          message: expect.objectContaining({ role: "user", text: "Explain this change" }),
+        }),
+      });
+      expect(testState.drafts.get(scopedThreadKey(child))).toBe("");
+      expect(testState.drafts.get(scopedThreadKey(ownerRef))).toBe("parent work in progress");
+    });
+  });
   it("branches from stable history while the parent is working and keeps its draft", async () => {
     await act(async () => {
       const child = await controller.create("Explain this change");
@@ -133,7 +160,7 @@ describe("side conversation creation", () => {
           title: "Side conversation",
         },
       });
-      expect(testState.drafts.get(scopedThreadKey(child))).toBe("Explain this change");
+      expect(testState.drafts.get(scopedThreadKey(child))).toBe("");
       expect(testState.drafts.get(scopedThreadKey(ownerRef))).toBe("parent work in progress");
       expect(testState.opened).toEqual([{ owner: ownerRef, childId: child.threadId }]);
     });
@@ -160,7 +187,14 @@ describe("side conversation creation", () => {
       finishFork(AsyncResult.success(undefined));
       const child = await pending;
       if (child === null) throw new Error("Expected a committed child");
-      expect(testState.drafts.get(scopedThreadKey(child))).toBe("Original question");
+      expect(testState.drafts.get(scopedThreadKey(child))).toBe("");
+      expect(testState.start).toHaveBeenCalledWith({
+        environmentId,
+        input: expect.objectContaining({
+          threadId: child.threadId,
+          message: expect.objectContaining({ text: "Original question" }),
+        }),
+      });
       expect(testState.opened).toEqual([{ owner: ownerRef, childId: child.threadId }]);
     });
     expect(testState.drafts.get(scopedThreadKey(ownerRef))).toBe("new parent draft");
@@ -181,7 +215,7 @@ describe("side conversation creation", () => {
       await controller.create("Keep this question");
     });
     expect(testState.fork).toHaveBeenCalledTimes(2);
-    expect([...testState.drafts.values()]).toContain("Keep this question");
+    expect(testState.start).toHaveBeenCalledOnce();
   });
 
   it("prevents overlapping clicks from creating multiple children", async () => {
@@ -200,7 +234,7 @@ describe("side conversation creation", () => {
     });
     expect(testState.fork).toHaveBeenCalledOnce();
     expect(testState.opened).toHaveLength(1);
-    expect([...testState.drafts.values()]).toContain("First question");
+    expect(testState.start).toHaveBeenCalledOnce();
     expect([...testState.drafts.values()]).not.toContain("Second question");
   });
 
@@ -218,5 +252,60 @@ describe("side conversation creation", () => {
     act(() => renderer.update(<Probe owner={ownerRef} />));
     await expect(controller.create()).rejects.toThrow("Update this environment");
     expect(testState.fork).not.toHaveBeenCalled();
+  });
+
+  it("keeps the question in the opened child's draft if its first turn is rejected", async () => {
+    testState.start.mockResolvedValueOnce(
+      AsyncResult.failure(Cause.fail(new Error("send rejected"))),
+    );
+    await act(async () => {
+      const child = await controller.create("Keep this question");
+      if (child === null) throw new Error("Expected a committed child");
+      expect(testState.drafts.get(scopedThreadKey(child))).toBe("Keep this question");
+      expect(testState.opened).toEqual([{ owner: ownerRef, childId: child.threadId }]);
+    });
+    expect(testState.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: expect.stringContaining("send rejected"),
+      }),
+    );
+    expect(testState.drafts.get(scopedThreadKey(ownerRef))).toBe("parent work in progress");
+    expect(controller.creating).toBe(false);
+  });
+
+  it("holds creation busy through submission and preserves a newer child draft", async () => {
+    let finishSend: (value: AtomCommandResult<void, Error>) => void = () => undefined;
+    testState.start.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSend = resolve;
+        }),
+    );
+    await act(async () => {
+      const pending = controller.create("First question");
+      await Promise.resolve();
+      const childKey = [...testState.drafts.keys()].find(
+        (key) => key !== scopedThreadKey(ownerRef),
+      );
+      if (!childKey) throw new Error("Expected a child draft");
+      expect(testState.opened).toEqual([]);
+      testState.drafts.set(childKey, "A newer question");
+      await expect(controller.create("Second question")).resolves.toBeNull();
+      finishSend(AsyncResult.success(undefined));
+      await pending;
+      expect(testState.drafts.get(childKey)).toBe("A newer question");
+    });
+    expect(testState.fork).toHaveBeenCalledOnce();
+    expect(testState.start).toHaveBeenCalledOnce();
+    expect(testState.opened).toHaveLength(1);
+    expect(controller.creating).toBe(false);
+  });
+
+  it("opens an empty side conversation without starting an empty turn", async () => {
+    await act(async () => {
+      await controller.create();
+    });
+    expect(testState.start).not.toHaveBeenCalled();
+    expect(testState.opened).toHaveLength(1);
   });
 });

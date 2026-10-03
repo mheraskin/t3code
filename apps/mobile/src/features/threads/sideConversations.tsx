@@ -8,7 +8,7 @@ import {
   sideConversationsForThread,
 } from "@t3tools/client-runtime/state/side-conversations";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import { ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import { MessageId, ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import { useCallback, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { uuidv4 } from "../../lib/uuid";
@@ -17,7 +17,7 @@ import { useEnvironmentServerConfig, useThreadShells } from "../../state/entitie
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { setComposerDraftText } from "../../state/use-composer-drafts";
+import { getComposerDraftSnapshot, setComposerDraftText } from "../../state/use-composer-drafts";
 import { waitForThreadShellReady } from "./threadForkNavigation";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 
@@ -31,6 +31,7 @@ export function useMobileSideConversationActions({
   const navigation = useNavigation();
   const isFocused = useIsFocused();
   const forkFromRun = useAtomCommand(threadEnvironment.forkFromRun, "create side conversation");
+  const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const creating = useRef(false);
   const [busy, setBusy] = useState(false);
   const config = useEnvironmentServerConfig(thread?.environmentId ?? null);
@@ -64,6 +65,34 @@ export function useMobileSideConversationActions({
           },
         });
         if (result._tag !== "Success") return false;
+        const childKey = scopedThreadKey(source.environmentId, targetThreadId);
+        setComposerDraftText(childKey, draft);
+        if (draft.trim()) {
+          const sent = await startTurn({
+            environmentId: source.environmentId,
+            input: {
+              threadId: targetThreadId,
+              message: {
+                messageId: MessageId.make(uuidv4()),
+                role: "user",
+                text: draft.trim(),
+                attachments: [],
+              },
+              runtimeMode: source.runtimeMode,
+              interactionMode: source.interactionMode,
+              dispatchMode: "start",
+            },
+          });
+          if (sent._tag === "Success") {
+            if (getComposerDraftSnapshot(childKey).text === draft)
+              setComposerDraftText(childKey, "");
+          } else {
+            Alert.alert(
+              "Question not sent",
+              "Your question is saved in the side conversation's draft. Open it to retry.",
+            );
+          }
+        }
         const atom = environmentThreadShells.threadShellAtom(
           scopeThreadRef(source.environmentId, targetThreadId),
         );
@@ -75,10 +104,8 @@ export function useMobileSideConversationActions({
             "Side conversation created",
             "Reconnect and open it from its parent conversation.",
           );
-          return false;
+          return true;
         }
-        if (draft !== "")
-          setComposerDraftText(scopedThreadKey(source.environmentId, targetThreadId), draft);
         navigation.navigate("Thread", {
           environmentId: source.environmentId,
           threadId: targetThreadId,
@@ -89,7 +116,7 @@ export function useMobileSideConversationActions({
         setBusy(false);
       }
     },
-    [enabled, forkFromRun, projection, thread, navigation],
+    [enabled, forkFromRun, startTurn, projection, thread, navigation],
   );
   const openFromKeyboard = useCallback(() => {
     if (!enabled || !isFocused || thread === null) return false;

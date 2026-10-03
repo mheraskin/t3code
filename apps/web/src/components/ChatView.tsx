@@ -1,7 +1,6 @@
-import { Menu, MenuTrigger, MenuPopup, MenuItem } from "./ui/menu";
 import { SideConversationPanel } from "./SideConversationPanel";
 import { useSideConversation } from "../hooks/useSideConversation";
-import { sideConversationsForThread } from "@t3tools/client-runtime/state/side-conversations";
+import { parseComposerSideConversationCommand } from "@t3tools/shared/composerTrigger";
 import { ChatCanvas } from "./chat/ChatCanvas";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
@@ -1537,7 +1536,6 @@ export default function ChatView(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const sideConversation = useSideConversation(routeThreadRef);
-  const sideConversationThreads = sideConversationsForThread(useThreadShells(), routeThreadRef);
   const openSideConversation = useCallback(
     async (question = "", runId?: RunId) => {
       try {
@@ -8160,20 +8158,32 @@ export default function ChatView(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
-    const sideQuestion = /^\s*\/(?:side|btw)(?:\s+([\s\S]*))?\s*$/.exec(promptRef.current);
-    if (sideQuestion && !directAnnotation && !composerHasNonPromptContent) {
+    const sideQuestion =
+      !directAnnotation && editingQueuedRun === null
+        ? parseComposerSideConversationCommand(promptRef.current)
+        : null;
+    if (sideQuestion) {
+      if (composerHasNonPromptContent) {
+        toastManager.add({
+          type: "warning",
+          title: "Attachments and context stay in this draft",
+          description: "Open a side conversation from the thread actions and add them there.",
+        });
+        return;
+      }
       const original = promptRef.current;
       const submittedRouteKey = routeThreadKey;
       const submittedDraftTarget = composerDraftTarget;
-      const created = await openSideConversation(sideQuestion[1] ?? "");
+      const created = await openSideConversation(sideQuestion.message);
       if (
         created &&
-        currentRouteThreadKeyRef.current === submittedRouteKey &&
-        promptRef.current === original
+        useComposerDraftStore.getState().getComposerDraft(submittedDraftTarget)?.prompt === original
       ) {
-        promptRef.current = "";
         setComposerDraftPrompt(submittedDraftTarget, "");
-        composerRef.current?.resetCursorState();
+        if (currentRouteThreadKeyRef.current === submittedRouteKey) {
+          promptRef.current = "";
+          composerRef.current?.resetCursorState();
+        }
       }
       return;
     }
@@ -10696,37 +10706,6 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
-          <div className="flex items-center gap-1">
-            <Button
-              size="xs"
-              variant="ghost"
-              title="Context from the last completed turn; shares this workspace"
-              disabled={!sideConversation.available}
-              onClick={() => void openSideConversation()}
-            >
-              Side conversation
-            </Button>
-            {sideConversationThreads.length > 0 ? (
-              <Menu>
-                <MenuTrigger render={<Button size="xs" variant="ghost" />}>
-                  Reopen ({sideConversationThreads.length})
-                </MenuTrigger>
-                <MenuPopup>
-                  {sideConversationThreads.map((child) => (
-                    <MenuItem
-                      key={child.id}
-                      onClick={() =>
-                        useRightPanelStore.getState().openSideConversation(routeThreadRef, child.id)
-                      }
-                    >
-                      {child.title}
-                      {child.archivedAt ? " (archived)" : ""}
-                    </MenuItem>
-                  ))}
-                </MenuPopup>
-              </Menu>
-            ) : null}
-          </div>
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -11057,6 +11036,11 @@ export default function ChatView(props: ChatViewProps) {
                                 ) : null
                               }
                               bannerItems={composerBannerItems}
+                              offersSideConversations={
+                                isServerThread &&
+                                sideConversation.supported &&
+                                editingQueuedRun === null
+                              }
                               // With attachments or contexts aboard the pick just inserts the
                               // text, so it sends as a prompt like the typed path would.
                               onUsageLimitsCommand={
