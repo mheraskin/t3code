@@ -11,6 +11,7 @@ import {
   ModelSelection,
   type OrchestrationV2AppThread,
   OrchestrationV2AppThreadJson,
+  OrchestrationV2LegacyForkOrigin,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2TurnItem,
@@ -66,6 +67,19 @@ interface LegacyThreadRow {
 interface LegacyRepairRow extends LegacyThreadRow {
   readonly payload_json: string;
 }
+
+interface LegacyForkRow {
+  readonly thread_id: string;
+  readonly project_id: string;
+  readonly fork_json: string | null;
+  readonly side_chat: number | null;
+  readonly parent_thread_id: string | null;
+}
+
+type LegacyForkMetadata = Pick<
+  OrchestrationV2AppThread,
+  "presentation" | "filedUnderThreadId" | "legacyFork" | "lineage"
+>;
 
 interface LegacyMessageRow {
   readonly message_id: string;
@@ -123,6 +137,9 @@ const decodeModelSelection = Schema.decodeUnknownOption(ModelSelection);
 const decodeAttachments = Schema.decodeUnknownOption(Schema.Array(ChatAttachment));
 const decodePullRequests = Schema.decodeUnknownOption(Schema.Array(ThreadPullRequestLink));
 const decodeLinkedPullRequest = Schema.decodeUnknownOption(ThreadLinkedPullRequest);
+const decodeLegacyFork = Schema.decodeUnknownOption(OrchestrationV2LegacyForkOrigin);
+const decodeThreadId = Schema.decodeUnknownOption(ThreadId);
+const decodeMessageContext = Schema.decodeUnknownSync(OrchestrationMessageContext);
 const decodeStoredThread = Schema.decodeUnknownOption(
   Schema.fromJsonString(OrchestrationV2AppThreadJson),
 );
@@ -186,7 +203,10 @@ function nullableDateTime(value: string | null): DateTime.Utc | null {
   return value === null ? null : dateTime(value);
 }
 
-function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
+function importedThread(
+  row: LegacyThreadRow,
+  forkMetadata?: LegacyForkMetadata,
+): OrchestrationV2AppThread {
   const threadId = ThreadId.make(row.thread_id);
   const modelSelection = modelSelectionFor(row);
   const branch = row.branch?.trim() || null;
@@ -226,6 +246,9 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
       rootThreadId: threadId,
     },
     forkedFrom: null,
+    presentation: { kind: "standard" },
+    filedUnderThreadId: null,
+    ...forkMetadata,
     createdAt: dateTime(row.created_at),
     updatedAt: dateTime(row.updated_at),
     archivedAt: nullableDateTime(row.archived_at),
@@ -259,9 +282,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
     text: row.text,
     ...(row.context_json
       ? {
-          context: Schema.decodeUnknownSync(OrchestrationMessageContext)(
-            parseJson(row.context_json),
-          ),
+          context: decodeMessageContext(parseJson(row.context_json)),
         }
       : {}),
     attachments,
@@ -297,9 +318,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
           text: row.text,
           ...(row.context_json
             ? {
-                context: Schema.decodeUnknownSync(OrchestrationMessageContext)(
-                  parseJson(row.context_json),
-                ),
+                context: decodeMessageContext(parseJson(row.context_json)),
               }
             : {}),
           attachments,
@@ -311,9 +330,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
           text: row.text,
           ...(row.context_json
             ? {
-                context: Schema.decodeUnknownSync(OrchestrationMessageContext)(
-                  parseJson(row.context_json),
-                ),
+                context: decodeMessageContext(parseJson(row.context_json)),
               }
             : {}),
           streaming: false,
@@ -344,10 +361,142 @@ function chunks<A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A
   return result;
 }
 
+function removeCyclicRelationships(parents: Map<string, ThreadId>): void {
+  const inspected = new Set<string>();
+  for (const threadId of parents.keys()) {
+    const path: string[] = [];
+    const positions = new Map<string, number>();
+    let current: string | undefined = threadId;
+    while (current !== undefined && !inspected.has(current)) {
+      const cycleStart = positions.get(current);
+      if (cycleStart !== undefined) {
+        for (const cyclicThreadId of path.slice(cycleStart)) parents.delete(cyclicThreadId);
+        break;
+      }
+      positions.set(current, path.length);
+      path.push(current);
+      current = parents.get(current);
+    }
+    for (const visited of path) inspected.add(visited);
+  }
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const eventSink = yield* EventSink.EventSinkV2;
   const transcriptImports = yield* makeKeyedSerialExecutor<ThreadId>();
+
+  const readForkMetadata = Effect.gen(function* () {
+    const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_threads)`;
+    const hasColumn = (name: string) => columns.some((column) => column.name === name);
+    if (!hasColumn("fork_json") && !hasColumn("parent_thread_id")) {
+      return new Map<string, LegacyForkMetadata>();
+    }
+    const rows = yield* sql<LegacyForkRow>`
+      SELECT thread_id, project_id,
+        ${hasColumn("fork_json") ? sql("fork_json") : sql`NULL`} AS fork_json,
+        ${hasColumn("side_chat") ? sql("side_chat") : sql`NULL`} AS side_chat,
+        ${hasColumn("parent_thread_id") ? sql("parent_thread_id") : sql`NULL`} AS parent_thread_id
+      FROM projection_threads
+    `;
+    const rowsById = new Map(rows.map((row) => [row.thread_id, row]));
+    const origins = new Map<string, OrchestrationV2LegacyForkOrigin>();
+    for (const row of rows) {
+      if (row.fork_json === null) continue;
+      const decoded = decodeLegacyFork(parseJson(row.fork_json));
+      if (Option.isSome(decoded)) origins.set(row.thread_id, decoded.value);
+    }
+    const turnIds = [...origins.values()].flatMap((origin) =>
+      origin.sourceTurnId === null ? [] : [origin.sourceTurnId],
+    );
+    const messageIds = [...origins.values()].flatMap((origin) =>
+      origin.sourceMessageId === null ? [] : [origin.sourceMessageId],
+    );
+    const turnOwners = new Map<string, Set<string>>();
+    const messageOwners = new Map<string, string>();
+    for (const ids of chunks(turnIds, 500)) {
+      const owners = yield* sql<{ readonly turn_id: string; readonly thread_id: string }>`
+        SELECT turn_id, thread_id FROM projection_turns WHERE turn_id IN ${sql.in(ids)}
+      `;
+      for (const owner of owners) {
+        const threads = turnOwners.get(owner.turn_id) ?? new Set<string>();
+        threads.add(owner.thread_id);
+        turnOwners.set(owner.turn_id, threads);
+      }
+    }
+    for (const ids of chunks(messageIds, 500)) {
+      const owners = yield* sql<{ readonly message_id: string; readonly thread_id: string }>`
+        SELECT message_id, thread_id FROM projection_thread_messages WHERE message_id IN ${sql.in(ids)}
+      `;
+      for (const owner of owners) messageOwners.set(owner.message_id, owner.thread_id);
+    }
+    const parents = new Map<string, ThreadId>();
+    for (const [threadId, origin] of origins) {
+      const child = rowsById.get(threadId);
+      const parent = rowsById.get(origin.sourceThreadId);
+      const turnOwner =
+        origin.sourceTurnId === null ? undefined : turnOwners.get(origin.sourceTurnId);
+      const messageOwner =
+        origin.sourceMessageId === null ? undefined : messageOwners.get(origin.sourceMessageId);
+      if (
+        parent !== undefined &&
+        child?.project_id === parent.project_id &&
+        threadId !== parent.thread_id &&
+        (turnOwner === undefined || turnOwner.has(parent.thread_id)) &&
+        (messageOwner === undefined || messageOwner === parent.thread_id)
+      ) {
+        parents.set(threadId, origin.sourceThreadId);
+      }
+    }
+    removeCyclicRelationships(parents);
+    const filings = new Map<string, ThreadId>();
+    for (const row of rows) {
+      const decoded = decodeThreadId(row.parent_thread_id);
+      if (Option.isNone(decoded)) continue;
+      const parent = rowsById.get(decoded.value);
+      if (
+        parent !== undefined &&
+        row.project_id === parent.project_id &&
+        row.thread_id !== parent.thread_id
+      ) {
+        filings.set(row.thread_id, decoded.value);
+      }
+    }
+    removeCyclicRelationships(filings);
+    const roots = new Map<string, ThreadId>();
+    for (const row of rows) {
+      let current = row.thread_id;
+      const path: string[] = [];
+      while (!roots.has(current)) {
+        path.push(current);
+        const parent = parents.get(current);
+        if (parent === undefined) break;
+        current = parent;
+      }
+      const root = roots.get(current) ?? ThreadId.make(current);
+      for (const visited of path) roots.set(visited, root);
+    }
+    const metadata = new Map<string, LegacyForkMetadata>();
+    for (const row of rows) {
+      const parentThreadId = parents.get(row.thread_id) ?? null;
+      const filedUnderThreadId = filings.get(row.thread_id) ?? null;
+      const legacyFork = origins.get(row.thread_id);
+      metadata.set(row.thread_id, {
+        presentation:
+          row.side_chat === 1 && parentThreadId !== null
+            ? { kind: "side", ownerThreadId: parentThreadId }
+            : { kind: "standard" },
+        filedUnderThreadId,
+        ...(legacyFork === undefined ? {} : { legacyFork }),
+        lineage: {
+          parentThreadId,
+          relationshipToParent: parentThreadId === null ? null : "fork",
+          rootThreadId: roots.get(row.thread_id) ?? ThreadId.make(row.thread_id),
+        },
+      });
+    }
+    return metadata;
+  });
 
   const listMessages = (threadId: ThreadId) =>
     sql<LegacyMessageRow>`
@@ -442,6 +591,7 @@ const make = Effect.gen(function* () {
 
   const reconcileShellsBase = Effect.gen(function* () {
     const now = DateTime.formatIso(yield* DateTime.now);
+    const forkMetadata = yield* readForkMetadata;
     const repairRows = yield* sql<LegacyRepairRow>`
       SELECT
         thread.thread_id,
@@ -483,6 +633,8 @@ const make = Effect.gen(function* () {
          OR json_type(projection.payload_json, '$.pullRequests') IS NULL
          OR json_type(projection.payload_json, '$.branchPullRequest') IS NULL
          OR json_type(projection.payload_json, '$.activeOrderKey') IS NULL
+         OR json_type(projection.payload_json, '$.presentation') IS NULL
+         OR json_type(projection.payload_json, '$.filedUnderThreadId') IS NULL
       ORDER BY thread.created_at ASC, thread.thread_id ASC
     `;
     let repairedThreadCount = 0;
@@ -490,10 +642,24 @@ const make = Effect.gen(function* () {
       const decoded = decodeStoredThread(row.payload_json);
       if (Option.isNone(decoded)) continue;
       const current = decoded.value;
-      const legacy = importedThread(row);
+      const legacy = importedThread(row, forkMetadata.get(row.thread_id));
       const legacyPullRequests = legacy.pullRequests ?? [];
       const repaired: OrchestrationV2AppThread = {
         ...current,
+        presentation: current.presentation ?? legacy.presentation,
+        filedUnderThreadId:
+          current.filedUnderThreadId === undefined
+            ? legacy.filedUnderThreadId
+            : current.filedUnderThreadId,
+        ...(current.legacyFork === undefined && legacy.legacyFork !== undefined
+          ? { legacyFork: legacy.legacyFork }
+          : {}),
+        lineage:
+          current.presentation === undefined &&
+          current.lineage.parentThreadId === null &&
+          current.forkedFrom === null
+            ? legacy.lineage
+            : current.lineage,
         pinnedAt: current.pinnedAt === undefined ? legacy.pinnedAt : current.pinnedAt,
         autoSettleDisabledAt:
           current.autoSettleDisabledAt === undefined
@@ -586,7 +752,7 @@ const make = Effect.gen(function* () {
     let importedThreadCount = repairedThreadCount;
     let importedMessageCount = 0;
     for (const row of rows) {
-      const thread = importedThread(row);
+      const thread = importedThread(row, forkMetadata.get(row.thread_id));
       const previews = yield* listShellMessages(thread.id);
       const events: Array<OrchestrationV2DomainEvent> = [
         {
