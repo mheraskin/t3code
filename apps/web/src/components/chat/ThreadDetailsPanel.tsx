@@ -126,7 +126,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             headingId="thread-details-workspace-heading"
             title="Workspace"
             separated={false}
-            showHeading={density === "full"}
+            collapsible
           >
             {props.versionMismatch ? (
               <div className="mx-1 mb-2 flex gap-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
@@ -198,8 +198,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             <ThreadDetailsSection
               headingId="thread-details-version-control-heading"
               title="Version Control"
-              showHeading={density === "full"}
-              separated={density === "full"}
+              collapsible
             >
               <div className="flex flex-col">
                 {props.isGitRepo ? (
@@ -226,7 +225,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             <ThreadAutomationsPanel environmentId={props.environmentId} threadId={props.threadId} />
           ) : null}
 
-          {density === "full" && !props.draftId ? (
+          {!props.draftId ? (
             <ThreadRelationshipsPanel
               environmentId={props.environmentId}
               threadId={props.threadId}
