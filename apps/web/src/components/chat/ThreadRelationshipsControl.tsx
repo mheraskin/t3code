@@ -289,6 +289,7 @@ export function ThreadRelationshipsPanel(props: {
       headingId="thread-details-lineage-heading"
       title={runningCount > 0 ? `Lineage · ${runningCount} running` : "Lineage"}
       data-thread-relationships-panel
+      collapsible
       actions={
         canDetach ? (
           <Menu>
@@ -298,7 +299,8 @@ export function ThreadRelationshipsPanel(props: {
                   size="icon-xs"
                   variant="ghost"
                   part="icon"
-                  aria-label="More thread actions"
+                  aria-label="Agent session actions"
+                  title="Agent session actions"
                   disabled={busyAction !== null}
                 />
               }

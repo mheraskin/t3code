@@ -101,7 +101,13 @@ it("shows the matching child agent details and refreshes them when the agent set
   expect(text()).not.toContain("tok");
   expect(text()).not.toContain("Unlinked agent");
   expect(text()).not.toContain("Active agents");
-  expect(renderer.root.findAllByProps({ type: "button", "aria-expanded": true })).toHaveLength(0);
+  expect(
+    renderer.root.findAllByProps({
+      type: "button",
+      "aria-expanded": true,
+      "aria-controls": undefined,
+    }),
+  ).toHaveLength(0);
 
   state.projection = {
     ...projection,
@@ -116,11 +122,13 @@ it("shows the matching child agent details and refreshes them when the agent set
     ],
   };
   await act(async () => renderer.update(cloneElement(panel)));
-  expect(renderer.root.findByType("h3").children).toEqual(["Lineage"]);
+  expect(text()).toContain("Lineage");
   expect(text()).toContain("Previous agents (1)");
   expect(text()).not.toContain("Checker");
   await act(async () =>
-    renderer.root.findByProps({ type: "button", "aria-expanded": false }).props.onClick(),
+    renderer.root
+      .findByProps({ type: "button", "aria-expanded": false, "aria-controls": undefined })
+      .props.onClick(),
   );
   expect(text()).toContain("Checker");
   expect(text()).toContain("2m 15s");
@@ -129,12 +137,16 @@ it("shows the matching child agent details and refreshes them when the agent set
   expect(text()).not.toContain("running");
   expect(text()).not.toContain("Worker");
   await act(async () =>
-    renderer.root.findByProps({ type: "button", "aria-expanded": true }).props.onClick(),
+    renderer.root
+      .findByProps({ type: "button", "aria-expanded": true, "aria-controls": undefined })
+      .props.onClick(),
   );
   expect(text()).not.toContain("Checker");
   expect(text()).toContain("Previous agents (1)");
   await act(async () =>
-    renderer.root.findByProps({ type: "button", "aria-expanded": false }).props.onClick(),
+    renderer.root
+      .findByProps({ type: "button", "aria-expanded": false, "aria-controls": undefined })
+      .props.onClick(),
   );
   expect(text()).toContain("Checker");
 
@@ -324,7 +336,9 @@ it("shows readable models and only differing workspace details in agent tooltips
   };
   await act(async () => renderer.update(cloneElement(panel)));
   await act(async () =>
-    renderer.root.findByProps({ type: "button", "aria-expanded": false }).props.onClick(),
+    renderer.root
+      .findByProps({ type: "button", "aria-expanded": false, "aria-controls": undefined })
+      .props.onClick(),
   );
   expect(text()).toContain("Final checks passed.");
   expect(text()).not.toContain("Stale progress");
