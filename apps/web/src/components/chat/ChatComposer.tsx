@@ -2429,6 +2429,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
     const onDesktopPasteAsText = () => {
       const activeElement = document.activeElement;
+      if (activeElement?.closest('[data-side-conversation="true"]')) return;
       const blocksPasteToFocus =
         activeElement instanceof Element &&
         activeElement.closest(
@@ -5559,6 +5560,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-side-conversation="true"]')
+      )
+        return;
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: getTerminalFocusOwner() !== null,

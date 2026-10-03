@@ -56,6 +56,7 @@ import { scopedThreadKey } from "../../lib/scopedEntities";
 import {
   composerContextImportsAtom,
   countComposerDraftAttachmentsAfterSelection,
+  getComposerDraftSnapshot,
 } from "../../state/use-composer-drafts";
 import type { ComposerDocumentAttachment } from "../../lib/composerContext";
 import { useProject, useThreadShells } from "../../state/entities";
@@ -184,6 +185,7 @@ export interface ThreadComposerProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+  readonly onOpenSideConversation?: (draft?: string) => Promise<boolean>;
   readonly onSendMessage: (followUp?: ActiveTurnComposerAction) => Promise<MessageId | null>;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
@@ -492,6 +494,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     pullRequestRepository: project?.repositoryIdentity?.displayName ?? null,
     selectedProviderStatus,
     hasThread: true,
+    offersSideConversations: props.onOpenSideConversation !== undefined,
     hasCompactableConversation: props.hasCompactableConversation,
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode:
@@ -599,6 +602,24 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         if (openUsageLimits()) onChangeDraftMessage("");
         return;
       }
+      if (props.onOpenSideConversation && /^\/side(?:\s|$)/i.test(props.draftMessage.trim())) {
+        if (props.draftAttachments.length > 0) {
+          Alert.alert(
+            "Attachments stay in this draft",
+            "Open a side conversation from the header and attach files there.",
+          );
+          return;
+        }
+        const draft = props.draftMessage.trim().replace(/^\/side\s*/i, "");
+        const sourceText = props.draftMessage;
+        if (
+          (await props.onOpenSideConversation(draft)) &&
+          getComposerDraftSnapshot(composerDraftKey).text === sourceText
+        ) {
+          onChangeDraftMessage("");
+        }
+        return;
+      }
       const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
       if (inFlightThreadIdsRef.current.has(threadKey)) return;
       inFlightThreadIdsRef.current.add(threadKey);
@@ -622,6 +643,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     },
     [
       props.draftMessage,
+      composerDraftKey,
+      props.onOpenSideConversation,
       props.draftAttachments.length,
       onChangeDraftMessage,
       openUsageLimits,

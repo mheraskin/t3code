@@ -55,6 +55,31 @@ function makeThread(
 
 const NOW = "2026-06-02T00:00:00.000Z";
 
+describe("side conversations in the main list", () => {
+  it("hides attached sides while retaining orphaned sides in navigation and reorder reads", () => {
+    const owner = makeThread({ id: ThreadId.make("owner"), title: "Owner" });
+    const side = makeThread({
+      id: ThreadId.make("side"),
+      title: "Side",
+      presentation: { kind: "side", ownerThreadId: owner.id },
+    });
+    const orphan = makeThread({
+      id: ThreadId.make("orphan"),
+      title: "Orphan",
+      presentation: { kind: "side", ownerThreadId: ThreadId.make("missing") },
+    });
+    const section = getThreadListV2OrderedSection({
+      threads: [owner, side, orphan],
+      section: "active",
+      now: NOW,
+    });
+    expect(section.map((thread) => thread.id)).toEqual(
+      expect.arrayContaining([owner.id, orphan.id]),
+    );
+    expect(section.some((thread) => thread.id === side.id)).toBe(false);
+  });
+});
+
 const linkedPullRequest = {
   projectId: ProjectId.make("project-1"),
   repository: "pingdotgg/t3code",

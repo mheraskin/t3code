@@ -201,6 +201,7 @@ export interface ThreadDetailScreenProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+  readonly onOpenSideConversation?: (draft?: string) => Promise<boolean>;
   readonly onSendMessage: (followUp?: ActiveTurnComposerAction) => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
   /** Whether the model picker may offer providers other than this thread's. */
@@ -1341,6 +1342,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       onNativePasteText={props.onNativePasteText}
                       onRemoveDraftImage={props.onRemoveDraftImage}
                       onStopThread={props.onStopThread}
+                      onOpenSideConversation={props.onOpenSideConversation}
                       onSendMessage={handleSendMessage}
                       onShowUsageLimits={showUsageLimits}
                       canSwitchProvider={props.canSwitchThreadProvider}

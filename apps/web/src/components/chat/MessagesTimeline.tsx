@@ -310,6 +310,7 @@ interface TimelineRowSharedState {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
+  onSideConversationFromRun?: (input: { readonly runId: RunId }) => Promise<void>;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -435,6 +436,7 @@ interface MessagesTimelineProps {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
+  onSideConversationFromRun?: (input: { readonly runId: RunId }) => Promise<void>;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -511,6 +513,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenThread,
   parentThreadLink = null,
   onForkFromRun,
+  onSideConversationFromRun,
   onRollbackCheckpoint,
   supportsConversationRollback,
   onRevertToTurnCount,
@@ -1155,6 +1158,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
+      ...(onSideConversationFromRun ? { onSideConversationFromRun } : {}),
       onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
@@ -1188,6 +1192,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
+      onSideConversationFromRun,
       onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
@@ -2537,28 +2542,43 @@ function AssistantForkButton({
   const runId = projectedItem.item.runId;
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void ctx
-                .onForkFromRun({ sourceThreadId: projectedItem.sourceThreadId, runId })
-                .finally(() => setBusy(false));
-            }}
-            aria-label="Fork from this response"
-          />
-        }
-      >
-        <GitForkIcon className={cn("size-3", busy && "animate-pulse")} />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Fork from this response</TooltipPopup>
-    </Tooltip>
+    <div className="flex items-center gap-1">
+      {ctx.onSideConversationFromRun && projectedItem.sourceThreadId === ctx.threadRef?.threadId ? (
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void ctx.onSideConversationFromRun?.({ runId }).finally(() => setBusy(false));
+          }}
+        >
+          Ask about this response
+        </Button>
+      ) : null}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void ctx
+                  .onForkFromRun({ sourceThreadId: projectedItem.sourceThreadId, runId })
+                  .finally(() => setBusy(false));
+              }}
+              aria-label="Fork from this response"
+            />
+          }
+        >
+          <GitForkIcon className={cn("size-3", busy && "animate-pulse")} />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Fork from this response</TooltipPopup>
+      </Tooltip>
+    </div>
   );
 }
 

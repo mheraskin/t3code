@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, ThreadId } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 /**
@@ -7,6 +7,11 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
  * remains data-driven.
  */
 export type ThreadActionMenuId =
+  | "file-under"
+  | `file:${string}`
+  | "unfile"
+  | "side-conversations"
+  | `open-side:${string}`
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"
@@ -31,6 +36,11 @@ export type ThreadActionMenuId =
   | "delete";
 
 export interface ThreadActionMenuState {
+  readonly filing?: {
+    readonly parentThreadId: ThreadId | null;
+    readonly candidates: ReadonlyArray<{ readonly id: ThreadId; readonly title: string }>;
+  };
+  readonly sideConversations?: ReadonlyArray<{ readonly id: ThreadId; readonly title: string }>;
   readonly branch: string | null;
   /**
    * Project scoping for the thread list. Null on surfaces with no scoped
@@ -70,6 +80,36 @@ export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
   return [
+    ...(state.filing
+      ? [
+          {
+            id: "file-under" as const,
+            label: "File under thread",
+            icon: "folder",
+            disabled: state.filing.candidates.length === 0,
+            children: state.filing.candidates.map((parent) => ({
+              id: `file:${parent.id}` as const,
+              label: parent.title,
+            })),
+          },
+          ...(state.filing.parentThreadId !== null
+            ? [{ id: "unfile" as const, label: "Move out of parent", icon: "folder" }]
+            : []),
+        ]
+      : []),
+    ...(state.sideConversations && state.sideConversations.length > 0
+      ? [
+          {
+            id: "side-conversations" as const,
+            label: `Side conversations (${state.sideConversations.length})`,
+            icon: "messages-square",
+            children: state.sideConversations.map((side) => ({
+              id: `open-side:${side.id}` as const,
+              label: side.title,
+            })),
+          },
+        ]
+      : []),
     ...(state.branch
       ? [
           {

@@ -7,7 +7,10 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import { sideConversationsForThread } from "@t3tools/client-runtime/state/side-conversations";
+import { sidebarFilingCandidates } from "../components/Sidebar.logic";
+import { useRightPanelStore } from "../rightPanelStore";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 
@@ -27,6 +30,8 @@ import {
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
   useProjects,
+  useThreadShells,
+  useServerConfigs,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { readLocalApi } from "../localApi";
@@ -71,6 +76,8 @@ export function useThreadActionMenu(input: {
   const { threadRef, projectCwd, onStartRename } = input;
   const router = useRouter();
   const projects = useProjects();
+  const threads = useThreadShells();
+  const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const logicalProjectKeyByPhysicalKey = useMemo(
@@ -142,6 +149,15 @@ export function useThreadActionMenu(input: {
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const items = buildThreadActionMenuItems({
+          ...(serverConfigs.get(thread.environmentId)?.environment.capabilities.threadFiling
+            ? {
+                filing: {
+                  parentThreadId: thread.filedUnderThreadId ?? null,
+                  candidates: sidebarFilingCandidates(thread, threads),
+                },
+              }
+            : {}),
+          sideConversations: sideConversationsForThread(threads, threadRef),
           branch: thread.branch ?? null,
           projectFilter: null,
           isPinned: thread.pinnedAt != null,
@@ -157,6 +173,24 @@ export function useThreadActionMenu(input: {
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
         const action: ThreadActionMenuId = clicked.value;
+        if (action.startsWith("file:") || action === "unfile") {
+          const result = await updateThreadMetadata({
+            environmentId: thread.environmentId,
+            input: {
+              threadId: thread.id,
+              filedUnderThreadId: action === "unfile" ? null : ThreadId.make(action.slice(5)),
+            },
+          });
+          if (result._tag === "Failure")
+            failureToast("Could not file thread", squashAtomCommandFailure(result));
+          return;
+        }
+        if (action.startsWith("open-side:")) {
+          useRightPanelStore
+            .getState()
+            .openSideConversation(threadRef, ThreadId.make(action.slice(10)));
+          return;
+        }
         if (action.startsWith("snooze:")) {
           const preset =
             action === "snooze:custom"
@@ -349,6 +383,8 @@ export function useThreadActionMenu(input: {
       unsettleThread,
       unsnoozeThread,
       updateThreadMetadata,
+      threads,
+      serverConfigs,
     ],
   );
 

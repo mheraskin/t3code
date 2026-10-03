@@ -151,6 +151,7 @@ export function resolveSidebarThreadSection(input: {
 const SIDEBAR_MARKER_PREFIX = "sidebar-marker-";
 
 export type SidebarListMarker =
+  | `branch:${string}`
   /** The top boundary is also a landing target when there are no pins. */
   | "pinned-header"
   /** Stand-in rows so an empty section has somewhere for the gap to open. */
@@ -260,7 +261,7 @@ export type SidebarThreadDropPlan =
 /** What dropping in `to` does to a thread lifted from `from`, for the badge
     on the lifted row. Null while reordering inside one section and for the
     working and snoozed shelves, which cannot be drop targets. */
-export type SidebarDropVerb = "pin" | "unpin" | "settle" | "unsettle" | "wake";
+export type SidebarDropVerb = "file" | "pin" | "unpin" | "settle" | "unsettle" | "wake";
 
 export function resolveSidebarDropVerb(
   from: SidebarSection,
@@ -531,6 +532,64 @@ export function buildMultiSelectThreadContextMenuItems(input: {
 
 export function isSidebarSubagentThread(thread: Pick<SidebarThreadSummary, "lineage">): boolean {
   return thread.lineage.relationshipToParent === "subagent";
+}
+
+type FiledSidebarThread = Pick<
+  SidebarThreadSummary,
+  | "id"
+  | "environmentId"
+  | "projectId"
+  | "title"
+  | "archivedAt"
+  | "filedUnderThreadId"
+  | "presentation"
+>;
+
+export function sidebarFilingCandidates<T extends FiledSidebarThread>(
+  thread: T,
+  threads: readonly T[],
+): T[] {
+  if (
+    threads.some(
+      (candidate) =>
+        candidate.environmentId === thread.environmentId &&
+        candidate.filedUnderThreadId === thread.id,
+    )
+  )
+    return [];
+  return threads.filter(
+    (candidate) =>
+      candidate.environmentId === thread.environmentId &&
+      candidate.projectId === thread.projectId &&
+      candidate.id !== thread.id &&
+      candidate.archivedAt === null &&
+      candidate.filedUnderThreadId == null &&
+      candidate.presentation?.kind !== "side",
+  );
+}
+
+export function orderFiledSidebarThreads<T extends FiledSidebarThread>(threads: readonly T[]): T[] {
+  const byId = new Map(threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]));
+  const children = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const thread of threads) {
+    const parentKey = `${thread.environmentId}:${thread.filedUnderThreadId}`;
+    const parent = thread.filedUnderThreadId == null ? undefined : byId.get(parentKey);
+    if (
+      parent &&
+      parent.id !== thread.id &&
+      parent.filedUnderThreadId == null &&
+      parent.projectId === thread.projectId
+    ) {
+      const siblings = children.get(parentKey);
+      if (siblings) siblings.push(thread);
+      else children.set(parentKey, [thread]);
+    } else roots.push(thread);
+  }
+  return roots.flatMap((thread) => [
+    thread,
+    ...(children.get(`${thread.environmentId}:${thread.id}`) ?? []),
+  ]);
 }
 
 export function filterSidebarV2VisibleThreads<

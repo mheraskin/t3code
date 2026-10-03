@@ -24,6 +24,21 @@ import {
 } from "./use-composer-command-menu";
 
 describe("mobile slash commands", () => {
+  it("offers side conversations locally only for supported thread composers", () => {
+    const input = {
+      query: "side",
+      atMessageStart: true,
+      hasThread: true,
+      offersSideConversations: true,
+      allowInteractionMode: false,
+      selectedProviderStatus: null,
+    };
+    expect(buildComposerSlashCommandItems(input).map((item) => item.label)).toEqual(["/side"]);
+    expect(buildComposerSlashCommandItems({ ...input, hasThread: false })).toEqual([]);
+    expect(buildComposerSlashCommandItems({ ...input, offersSideConversations: false })).toEqual(
+      [],
+    );
+  });
   const antigravity = {
     driver: ProviderDriverKind.make("antigravity"),
     showInteractionModeToggle: false,

@@ -32,6 +32,24 @@ also send files to T3 Code through another app's system share sheet.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
 
+## Side conversations
+
+Use **Side conversation**, **Open side conversation** in the command palette, or
+send `/side` (also `/btw`) to ask a follow-up beside your main thread. Add a question
+after the command to put it in the side conversation’s draft. **Ask about this
+response** starts from a specific response.
+
+A new side conversation uses context through a completed turn. If the main agent
+is working, its current unfinished turn is excluded. The context label shows
+whether the provider retained its native conversation or received portable
+context. Both conversations share the same workspace; approvals required does
+not make the side conversation read-only.
+
+Closing the panel keeps its conversation and draft. Reopen it from the parent
+thread or its menu. **Promote** makes it a regular thread, **Archive** pauses its
+use until **Unarchive**, and **Discard** deletes it. Side conversations require
+an updated server.
+
 ## Send while the agent is working
 
 On web and desktop, choose **Settings → General → Follow-up behavior** to queue

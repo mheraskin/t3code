@@ -22,6 +22,7 @@ import {
   Files,
   Globe2,
   Plus,
+  MessagesSquare,
   TerminalSquare,
   Volume2,
   VolumeOff,
@@ -122,6 +123,8 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddSideConversation?: (() => void) | undefined;
+  sideConversationAvailable?: boolean | undefined;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -319,6 +322,8 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddSideConversation?: (() => void) | undefined;
+  sideConversationAvailable?: boolean | undefined;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -332,6 +337,14 @@ function RightPanelEmptyState(props: {
   const [highlight, setHighlight] = useState(-1);
 
   const actions = [
+    {
+      label: "Side conversation",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: props.sideConversationAvailable === true,
+      disabledReason: "Requires a completed turn and an updated server.",
+      onClick: () => props.onAddSideConversation?.(),
+    },
     {
       label: "Browser",
       icon: Globe2,
@@ -579,6 +592,8 @@ function surfaceTitle(
   terminalLabelsById: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
+    case "side-conversation":
+      return "Side conversation";
     case "diff":
       return "Diff";
     case "files":
@@ -646,6 +661,8 @@ function SurfaceIcon({
   pullRequestStatusSeeds: Readonly<Record<string, PullRequestTabStatusSeed>> | undefined;
 }) {
   switch (surface.kind) {
+    case "side-conversation":
+      return <MessagesSquare className="size-3 shrink-0" />;
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       const url = !snapshot || snapshot.navStatus._tag === "Idle" ? null : snapshot.navStatus.url;
@@ -833,6 +850,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   }, []);
 
   const addSurfaceActions = [
+    {
+      label: "Side conversation",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: props.sideConversationAvailable === true,
+      disabledReason: "Requires a completed turn and an updated server.",
+      onClick: () => props.onAddSideConversation?.(),
+    },
     {
       label: "Browser",
       icon: Globe2,
@@ -1371,6 +1396,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
+            onAddSideConversation={props.onAddSideConversation}
+            sideConversationAvailable={props.sideConversationAvailable}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}

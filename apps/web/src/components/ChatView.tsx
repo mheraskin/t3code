@@ -1,3 +1,7 @@
+import { Menu, MenuTrigger, MenuPopup, MenuItem } from "./ui/menu";
+import { SideConversationPanel } from "./SideConversationPanel";
+import { useSideConversation } from "../hooks/useSideConversation";
+import { sideConversationsForThread } from "@t3tools/client-runtime/state/side-conversations";
 import { ChatCanvas } from "./chat/ChatCanvas";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
@@ -403,6 +407,7 @@ import {
   useThreadShell,
   useThreadRefs,
   useThreadVisibleTurnItems,
+  useThreadShells,
   waitForThreadShell,
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
@@ -732,7 +737,20 @@ function eventPathContainsSelector(event: Event, selector: string): boolean {
  * should be redirected into the composer. Shared by type-to-focus and
  * paste-to-focus so both honour the same surfaces.
  */
+function sideConversationOwnsEvent(event: Event): boolean {
+  if (eventPathContainsSelector(event, '[data-side-conversation="true"]')) return true;
+  if (
+    event.target === document.body ||
+    event.target === window ||
+    event.target === document.documentElement
+  ) {
+    return Boolean(document.activeElement?.closest('[data-side-conversation="true"]'));
+  }
+  return false;
+}
+
 function shouldRedirectInputToComposer(event: Event): boolean {
+  if (sideConversationOwnsEvent(event)) return false;
   if (event.defaultPrevented) return false;
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
@@ -1518,6 +1536,30 @@ export default function ChatView(props: ChatViewProps) {
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
   );
+  const sideConversation = useSideConversation(routeThreadRef);
+  const sideConversationThreads = sideConversationsForThread(useThreadShells(), routeThreadRef);
+  const openSideConversation = useCallback(
+    async (question = "", runId?: RunId) => {
+      try {
+        return await sideConversation.create(question, runId);
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not open side conversation",
+          description: error instanceof Error ? error.message : "The action failed.",
+        });
+        return null;
+      }
+    },
+    [sideConversation.create],
+  );
+  useEffect(() => {
+    const open = () => {
+      void openSideConversation();
+    };
+    window.addEventListener("t3:open-side-conversation", open);
+    return () => window.removeEventListener("t3:open-side-conversation", open);
+  }, [openSideConversation]);
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
   const currentRouteThreadKeyRef = useRef<string | null>(routeThreadKey);
   useLayoutEffect(() => {
@@ -6096,6 +6138,7 @@ export default function ChatView(props: ChatViewProps) {
         // the end on the next stream chunk. Clicking message text can leave
         // DOM focus on body, so these keys must also be heard at document.
         const handleKeyDown = (event: KeyboardEvent) => {
+          if (sideConversationOwnsEvent(event)) return;
           if (
             !(event.target instanceof Node) ||
             (!scrollNode.contains(event.target) &&
@@ -7350,6 +7393,19 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      if (sideConversationOwnsEvent(event)) {
+        const command = resolveShortcutCommand(event, keybindings, {
+          context: getShortcutContext(event.target),
+        });
+        if (
+          command === "rightPanel.close" &&
+          activeRightPanelSurface?.kind === "side-conversation"
+        ) {
+          event.preventDefault();
+          closeRightPanelSurface(activeRightPanelSurface);
+        }
+        return;
+      }
       if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
         event.stopPropagation();
         return;
@@ -7579,6 +7635,11 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.sideConversation") {
+        event.preventDefault();
+        void openSideConversation();
+        return;
+      }
       if (command === "thread.stop") {
         // An unavailable command should not shadow contextual shortcuts such as Escape to close a dialog.
         if (!canInterruptRunningThread) return;
@@ -7612,6 +7673,7 @@ export default function ChatView(props: ChatViewProps) {
     terminalUiState.activeTerminalId,
     activeThreadId,
     closeRightPanelSurface,
+    openSideConversation,
     requestCloseTerminal,
     requestClosePanelTerminal,
     createNewTerminal,
@@ -7650,6 +7712,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     };
     const handler = (event: ClipboardEvent) => {
+      if (sideConversationOwnsEvent(event)) return;
       if (!activeThreadId || isCommandPaletteOpen()) return;
       if (getTerminalFocusOwner() !== null) return;
       if (composerRef.current?.isModelPickerOpen()) return;
@@ -8097,6 +8160,23 @@ export default function ChatView(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
+    const sideQuestion = /^\s*\/(?:side|btw)(?:\s+([\s\S]*))?\s*$/.exec(promptRef.current);
+    if (sideQuestion && !directAnnotation && !composerHasNonPromptContent) {
+      const original = promptRef.current;
+      const submittedRouteKey = routeThreadKey;
+      const submittedDraftTarget = composerDraftTarget;
+      const created = await openSideConversation(sideQuestion[1] ?? "");
+      if (
+        created &&
+        currentRouteThreadKeyRef.current === submittedRouteKey &&
+        promptRef.current === original
+      ) {
+        promptRef.current = "";
+        setComposerDraftPrompt(submittedDraftTarget, "");
+        composerRef.current?.resetCursorState();
+      }
+      return;
+    }
     // Typed out in full rather than picked from the menu. Attachments or contexts
     // mean the user is sending a prompt, so those go through as usual.
     if (
@@ -10262,7 +10342,14 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   const rightPanelContent = activeThreadRef ? (
-    renderedRightPanelSurface?.kind === "preview" ? (
+    renderedRightPanelSurface?.kind === "side-conversation" ? (
+      <SideConversationPanel
+        key={`${activeThread.environmentId}:${renderedRightPanelSurface.resourceId}`}
+        ownerRef={activeThreadRef}
+        visible={rightPanelOpen}
+        threadId={renderedRightPanelSurface.resourceId}
+      />
+    ) : renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
@@ -10549,6 +10636,7 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div
+      data-chat-owner={routeThreadKey}
       ref={workspaceLayoutRef}
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
     >
@@ -10608,6 +10696,37 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
+          <div className="flex items-center gap-1">
+            <Button
+              size="xs"
+              variant="ghost"
+              title="Context from the last completed turn; shares this workspace"
+              disabled={!sideConversation.available}
+              onClick={() => void openSideConversation()}
+            >
+              Side conversation
+            </Button>
+            {sideConversationThreads.length > 0 ? (
+              <Menu>
+                <MenuTrigger render={<Button size="xs" variant="ghost" />}>
+                  Reopen ({sideConversationThreads.length})
+                </MenuTrigger>
+                <MenuPopup>
+                  {sideConversationThreads.map((child) => (
+                    <MenuItem
+                      key={child.id}
+                      onClick={() =>
+                        useRightPanelStore.getState().openSideConversation(routeThreadRef, child.id)
+                      }
+                    >
+                      {child.title}
+                      {child.archivedAt ? " (archived)" : ""}
+                    </MenuItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+            ) : null}
+          </div>
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -10714,6 +10833,13 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenThread={onOpenRelatedThread}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRun}
+                {...(!paintOnlyDisplayedTimeline && sideConversation.supported
+                  ? {
+                      onSideConversationFromRun: async ({ runId }: { runId: RunId }) => {
+                        await openSideConversation("", runId);
+                      },
+                    }
+                  : {})}
                 onRollbackCheckpoint={(input) => {
                   if (!paintOnlyDisplayedTimeline) void onRollbackCheckpoint(input);
                 }}
@@ -11220,6 +11346,8 @@ export default function ChatView(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
+          onAddSideConversation={() => void openSideConversation()}
+          sideConversationAvailable={sideConversation.available}
           onAddDevice={addDeviceSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
@@ -11275,6 +11403,8 @@ export default function ChatView(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
+            onAddSideConversation={() => void openSideConversation()}
+            sideConversationAvailable={sideConversation.available}
             onAddDevice={addDeviceSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}

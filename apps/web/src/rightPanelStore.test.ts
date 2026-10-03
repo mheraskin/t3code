@@ -27,6 +27,33 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("reopens independent side tabs per environment after closing and restoring panel state", () => {
+    const child = ThreadId.make("side-child");
+    const otherEnvironment = scopeThreadRef("env-2" as EnvironmentId, refA.threadId);
+    const store = useRightPanelStore.getState();
+    store.openSideConversation(refA, child);
+    store.openSideConversation(refA, child);
+    store.open(otherEnvironment, "diff");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toEqual([{ id: "side:side-child", kind: "side-conversation", resourceId: child }]);
+    const restored = migratePersistedRightPanelState(useRightPanelStore.getState());
+    expect(selectActiveRightPanelSurface(restored.byThreadKey, refA)?.kind).toBe(
+      "side-conversation",
+    );
+    store.closeSurface(refA, "side:side-child");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toHaveLength(0);
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, otherEnvironment)
+        ?.kind,
+    ).toBe("diff");
+    store.openSideConversation(refA, child);
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toMatchObject({ resourceId: child });
+  });
   it("gives each host/device its own tab and preserves renamed tabs", () => {
     const store = useRightPanelStore.getState();
     const android = {

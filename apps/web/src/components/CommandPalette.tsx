@@ -1915,6 +1915,22 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  if (
+    activeThread &&
+    activeThreadServerConfig?.environment.capabilities.threadSideConversations === true
+  ) {
+    actionItems.push({
+      kind: "action",
+      value: "action:side-conversation",
+      title: "Open side conversation",
+      searchTerms: ["side", "btw", "fork", "conversation"],
+      icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.sideConversation",
+      run: async () => {
+        window.dispatchEvent(new Event("t3:open-side-conversation"));
+      },
+    });
+  }
   if (activeThreadReferenceCopyTarget !== null) {
     actionItems.push({
       kind: "action",

@@ -60,6 +60,7 @@ export function buildComposerSlashCommandItems(input: {
   readonly hasThread: boolean;
   readonly hasCompactableConversation?: boolean;
   /** Whether T3 itself offers /usage-limits for the selected provider. */
+  readonly offersSideConversations?: boolean;
   readonly offersUsageLimits?: boolean;
   readonly allowInteractionMode: boolean;
   readonly selectedProviderStatus: Pick<
@@ -71,6 +72,17 @@ export function buildComposerSlashCommandItems(input: {
   const allowInteractionMode =
     input.allowInteractionMode && input.selectedProviderStatus?.showInteractionModeToggle !== false;
   const builtIn = [
+    ...(input.offersSideConversations && input.hasThread
+      ? [
+          {
+            id: "cmd:side",
+            type: "slash-command" as const,
+            command: "side",
+            label: "/side",
+            description: "Ask in a side conversation",
+          },
+        ]
+      : []),
     {
       id: "cmd:model",
       type: "slash-command",
@@ -94,7 +106,9 @@ export function buildComposerSlashCommandItems(input: {
     },
   ] satisfies ComposerCommandItem[];
   const items: ComposerCommandItem[] = builtIn.filter(
-    (item) => item.command.includes(query) && (item.command === "model" || allowInteractionMode),
+    (item) =>
+      item.command.includes(query) &&
+      (item.command === "model" || item.command === "side" || allowInteractionMode),
   );
 
   // Providers expand commands only at the start of a message. T3 commands
@@ -178,6 +192,7 @@ export function useComposerCommandMenu({
   hasThread,
   hasCompactableConversation,
   offersUsageLimits = false,
+  offersSideConversations = false,
   enabled = true,
   onChangeDraftMessage,
   onUpdateInteractionMode,
@@ -197,6 +212,7 @@ export function useComposerCommandMenu({
   readonly hasThread: boolean;
   readonly hasCompactableConversation: boolean;
   /** Whether T3 itself offers /usage-limits for the selected provider. */
+  readonly offersSideConversations?: boolean;
   readonly offersUsageLimits?: boolean;
   readonly enabled?: boolean;
   readonly onChangeDraftMessage: (value: string) => void;
@@ -349,6 +365,7 @@ export function useComposerCommandMenu({
         hasThread,
         hasCompactableConversation,
         offersUsageLimits,
+        offersSideConversations,
         allowInteractionMode: onUpdateInteractionMode !== undefined,
         selectedProviderStatus: selectedProviderStatus
           ? {
@@ -497,6 +514,7 @@ export function useComposerCommandMenu({
     skills,
     trigger,
     offersUsageLimits,
+    offersSideConversations,
   ]);
 
   const onSelect = useCallback(

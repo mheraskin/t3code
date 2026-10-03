@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   activeThreadAnchorTimestampMs,
   generateSpreadPinOrderKeys,
+  groupThreadsByWorktree,
   getLatestThreadForProject,
   pinOrderKeyBetween,
   planPinnedMove,
@@ -13,9 +14,41 @@ import {
   sortPinnedThreadsByOrderKey,
   sortSettledThreads,
   sortThreads,
+  threadWorktreeGroupKey,
   type SettledThreadTimestampInput,
   type ThreadSortInput,
 } from "./threadSort.ts";
+
+describe("checkout grouping", () => {
+  it("keeps project and branch groups in first-seen order without changing member order", () => {
+    const threads = [
+      { id: "a", projectId: "one", environmentId: "local", branch: "main" },
+      { id: "b", projectId: "two", environmentId: "local", branch: "main" },
+      { id: "c", projectId: "one", environmentId: "local", branch: "feature" },
+      { id: "d", projectId: "one", environmentId: "local", branch: "main" },
+      { id: "e", projectId: "one", environmentId: "remote", branch: "main" },
+    ];
+    expect(
+      groupThreadsByWorktree(threads).map((group) => group.threads.map(({ id }) => id)),
+    ).toEqual([["a", "d"], ["c"], ["b"], ["e"]]);
+  });
+
+  it("groups separate worktree project records by logical repository and isolates environments", () => {
+    const base = { environmentId: "local", branch: "main" };
+    const first = { ...base, projectId: "root", worktreePath: "/one" };
+    const second = { ...base, projectId: "worktree", worktreePath: "/two" };
+    expect(groupThreadsByWorktree([first, second], () => "repo")[0]?.threads).toEqual([
+      first,
+      second,
+    ]);
+    expect(threadWorktreeGroupKey(first, "repo")).not.toBe(
+      threadWorktreeGroupKey({ ...first, environmentId: "remote" }, "repo"),
+    );
+    expect(threadWorktreeGroupKey({ projectId: "repo", worktreePath: "/one" })).not.toBe(
+      threadWorktreeGroupKey({ projectId: "repo", worktreePath: "/two" }),
+    );
+  });
+});
 
 describe("activeThreadAnchorTimestampMs", () => {
   it("uses the later unsettle time when an old thread re-enters the active list", () => {

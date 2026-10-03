@@ -1,3 +1,12 @@
+import {
+  groupThreadsByWorktree,
+  threadWorktreeGroupKey,
+} from "@t3tools/client-runtime/state/thread-sort";
+import {
+  sideConversationsForThread,
+  sideConversationOwnerThreadId,
+  visibleMainConversationThreads,
+} from "@t3tools/client-runtime/state/side-conversations";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { setThreadChangeRequestSnapshot } from "./ThreadStatusIndicators";
@@ -50,11 +59,7 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import {
-  type EnvironmentMachineKind,
-  type ScopedThreadRef,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { type EnvironmentMachineKind, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
@@ -173,6 +178,8 @@ import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
+  sidebarFilingCandidates,
+  orderFiledSidebarThreads,
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
@@ -1049,6 +1056,12 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
 // the same icons as the row actions and context menu so the drop reads as the
 // action it performs.
 const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
+  file: (
+    <>
+      <FolderIcon aria-hidden className="size-3" />
+      File under thread
+    </>
+  ),
   pin: (
     <>
       <PinIcon aria-hidden className="size-3" />
@@ -1101,6 +1114,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // the descriptor is not loaded. Pinning itself lives in the context menu.
   pinningSupported: boolean;
   isPinned: boolean;
+  sideConversationCount: number;
+  sideConversationNeedsAttention: boolean;
+  onOpenSideConversations: (ref: ScopedThreadRef) => void;
   // Present on rows whose server supports every drop outcome: dnd-kit
   // sortable bag applied to the row root so the whole row drags (the
   // pointer sensor's distance constraint keeps plain clicks working).
@@ -1720,15 +1736,40 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
+  const sideConversationButton =
+    props.sideConversationCount > 0 ? (
+      <button
+        type="button"
+        aria-label={
+          props.sideConversationNeedsAttention
+            ? "Side conversations need attention"
+            : `Open ${props.sideConversationCount} side conversations`
+        }
+        onClick={(event) => {
+          event.stopPropagation();
+          props.onOpenSideConversations(threadRef);
+        }}
+        className={cn(
+          "inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+          props.sideConversationNeedsAttention && "text-warning-foreground",
+        )}
+      >
+        <MessageCircleQuestionIcon className="size-3" aria-hidden />
+        {props.sideConversationNeedsAttention ? "Needs attention" : props.sideConversationCount}
+      </button>
+    ) : null;
+
   if (variant === "slim") {
     return (
       <li
         data-thread-item
+        data-sidebar-thread-key={scopedThreadKey(threadRef)}
         {...sortableRootProps}
         {...(fileDropHandlers ?? {})}
         className={cn(
           // Matches the h-9 row so unrendered rows never shift the list when they paint.
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]",
+          thread.filedUnderThreadId != null && "ml-4",
           sortable?.isDragging && "relative z-20",
         )}
       >
@@ -1766,6 +1807,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {draftIndicator}
             {title}
             {pinIndicator}
+            {sideConversationButton}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -1880,11 +1922,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   return (
     <li
       data-thread-item
+      data-sidebar-thread-key={scopedThreadKey(threadRef)}
       {...sortableRootProps}
       {...(fileDropHandlers ?? {})}
       className={cn(
         // Matches the h-[4.875rem] content box; the py-0.5 padding is added on top.
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
+        thread.filedUnderThreadId != null && "ml-4",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -2083,6 +2127,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              {sideConversationButton}
               {terminalStatusIcon}
               {prBadge}
               {diff ? (
@@ -2449,6 +2494,23 @@ export default function Sidebar() {
   // Threads on non-primary environments (T3 Connect, hosted) resolve their
   // provider entry from their own environment's config: default instance ids
   // are driver slugs, so a flat map would collide across environments.
+  const logicalProjectKeyByPhysicalKey = useMemo(
+    () =>
+      new Map(
+        projectGroups.flatMap((group) =>
+          group.memberProjectRefs.map(
+            (ref) => [`${ref.environmentId}:${ref.projectId}`, group.projectKey] as const,
+          ),
+        ),
+      ),
+    [projectGroups],
+  );
+  const logicalProjectKeyOf = useCallback(
+    (thread: EnvironmentThreadShell) =>
+      logicalProjectKeyByPhysicalKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+      thread.projectId,
+    [logicalProjectKeyByPhysicalKey],
+  );
   const providerEntriesByEnvironment = useMemo(
     () =>
       deriveProviderEntriesByEnvironment(
@@ -2668,7 +2730,10 @@ export default function Sidebar() {
     const preciseNow = new Date().toISOString();
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
-    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+    const visible = filterSidebarV2VisibleThreads(
+      visibleMainConversationThreads(threads),
+      scopedProjectKeys,
+    );
     observeInboxReturns(workingShelfEnabled ? threads : null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2946,17 +3011,108 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, workingShelfExpanded, workingThreads]);
 
+  const sideConversationSummaryByOwnerKey = useMemo(() => {
+    const owners = new Map(
+      threads.map((thread) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        thread,
+      ]),
+    );
+    const summaries = new Map<
+      string,
+      { count: number; needsAttention: boolean; firstThreadId: ThreadId }
+    >();
+    for (const side of threads) {
+      const ownerId = sideConversationOwnerThreadId(side);
+      if (ownerId === null) continue;
+      const key = scopedThreadKey(scopeThreadRef(side.environmentId, ownerId));
+      const owner = owners.get(key);
+      if (!owner || owner.projectId !== side.projectId) continue;
+      const previous = summaries.get(key);
+      const needsAttention = side.hasPendingApprovals || side.hasPendingUserInput;
+      summaries.set(key, {
+        count: (previous?.count ?? 0) + 1,
+        needsAttention: previous?.needsAttention === true || needsAttention,
+        firstThreadId:
+          needsAttention && !previous?.needsAttention
+            ? side.id
+            : (previous?.firstThreadId ?? side.id),
+      });
+    }
+    return summaries;
+  }, [threads]);
+  const sideConversationSummaryByOwnerKeyRef = useRef(sideConversationSummaryByOwnerKey);
+  sideConversationSummaryByOwnerKeyRef.current = sideConversationSummaryByOwnerKey;
+  const [collapsedBranchGroups, setCollapsedBranchGroups] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const activeBranchGroups = useMemo(() => {
+    const byId = new Map(
+      activeThreads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]),
+    );
+    const effectiveThreads = activeThreads.map((thread) => {
+      const parent =
+        thread.filedUnderThreadId == null
+          ? undefined
+          : byId.get(`${thread.environmentId}:${thread.filedUnderThreadId}`);
+      return parent && parent.projectId === thread.projectId && parent.filedUnderThreadId == null
+        ? { ...thread, branch: parent.branch, worktreePath: parent.worktreePath }
+        : thread;
+    });
+    return groupThreadsByWorktree(effectiveThreads, logicalProjectKeyOf).map((group) => ({
+      key: group.key,
+      threads: orderFiledSidebarThreads(
+        group.threads.flatMap((thread) => {
+          const original = byId.get(`${thread.environmentId}:${thread.id}`);
+          return original ? [original] : [];
+        }),
+      ),
+    }));
+  }, [activeThreads, logicalProjectKeyOf]);
+  const activeBranchGroupByKey = useMemo(
+    () => new Map(activeBranchGroups.map((group) => [group.key, group])),
+    [activeBranchGroups],
+  );
+  const activeBranchGroupKeyByThreadKey = useMemo(
+    () =>
+      new Map(
+        activeBranchGroups.flatMap((group) =>
+          group.threads.map(
+            (thread) =>
+              [
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                group.key,
+              ] as const,
+          ),
+        ),
+      ),
+    [activeBranchGroups],
+  );
+  const activeBranchGroupKeyByThreadKeyRef = useRef(activeBranchGroupKeyByThreadKey);
+  activeBranchGroupKeyByThreadKeyRef.current = activeBranchGroupKeyByThreadKey;
+  const displayedActiveThreads = useMemo(
+    () =>
+      activeBranchGroups.flatMap((group) =>
+        collapsedBranchGroups.has(group.key)
+          ? group.threads.filter(
+              (thread) =>
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+            )
+          : group.threads,
+      ),
+    [activeBranchGroups, collapsedBranchGroups, routeThreadKey],
+  );
   const orderedThreads = useMemo(
     () => [
       ...pinnedThreads,
-      ...activeThreads,
+      ...displayedActiveThreads,
       ...visibleWorkingThreads,
       ...visibleSnoozedThreads,
       ...renderedSettledThreads,
     ],
     [
       pinnedThreads,
-      activeThreads,
+      displayedActiveThreads,
       visibleWorkingThreads,
       visibleSnoozedThreads,
       renderedSettledThreads,
@@ -3017,16 +3173,48 @@ export default function Sidebar() {
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
   snoozedThreadKeysRef.current = snoozedThreadKeys;
 
+  const branchNavigationKeys = useMemo(() => {
+    const current = orderedThreads.find(
+      (thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+    );
+    if (!current) return orderedThreadKeys;
+    const groupKey =
+      activeBranchGroupKeyByThreadKey.get(routeThreadKey ?? "") ??
+      threadWorktreeGroupKey(current, logicalProjectKeyOf(current));
+    return orderedThreads
+      .filter(
+        (thread) =>
+          (activeBranchGroupKeyByThreadKey.get(
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          ) ?? threadWorktreeGroupKey(thread, logicalProjectKeyOf(thread))) === groupKey,
+      )
+      .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)));
+  }, [
+    activeBranchGroupKeyByThreadKey,
+    logicalProjectKeyOf,
+    orderedThreads,
+    orderedThreadKeys,
+    routeThreadKey,
+  ]);
+  useEffect(() => {
+    if (!routeThreadKey) return;
+    threadListRef.current
+      ?.querySelector<HTMLElement>(
+        `[data-sidebar-thread-key="${window.CSS.escape(routeThreadKey)}"]`,
+      )
+      ?.scrollIntoView({ block: "nearest" });
+  }, [routeThreadKey, collapsedBranchGroups]);
   const jumpLabelByKey = useMemo(() => {
     const mapping = new Map<string, string>();
-    for (const [index, threadKey] of orderedThreadKeys.entries()) {
+    for (const [index, threadKey] of branchNavigationKeys.entries()) {
       const jumpCommand = threadJumpCommandForIndex(index);
       if (!jumpCommand) break;
       const label = shortcutLabelForCommand(keybindings, jumpCommand);
       if (label) mapping.set(threadKey, label);
     }
     return mapping;
-  }, [keybindings, orderedThreadKeys]);
+  }, [keybindings, branchNavigationKeys]);
   const { showThreadJumpHints: showJumpHints, updateThreadJumpHintsVisibility } =
     useThreadJumpHintVisibility();
 
@@ -3050,6 +3238,15 @@ export default function Sidebar() {
     [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
   );
 
+  const openOwnedSideConversation = useCallback(
+    (ref: ScopedThreadRef) => {
+      const summary = sideConversationSummaryByOwnerKeyRef.current.get(scopedThreadKey(ref));
+      if (!summary) return;
+      useRightPanelStore.getState().openSideConversation(ref, summary.firstThreadId);
+      void navigateToThread(ref);
+    },
+    [navigateToThread],
+  );
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
   const clearPendingFileDrop = useSidebarPendingFileDropStore((s) => s.clearPendingFileDrop);
   const handleThreadFileDrop = useCallback(
@@ -3214,7 +3411,19 @@ export default function Sidebar() {
     (threadKey: string, coParkingKeys?: ReadonlySet<string>): (() => void) | null => {
       if (routeThreadKeyRef.current !== threadKey) return null;
       const shell = threadByKeyRef.current.get(threadKey);
-      const orderedKeys = orderedThreadKeysRef.current;
+      const groupKeys = activeBranchGroupKeyByThreadKeyRef.current;
+      const groupKey = shell
+        ? (groupKeys.get(threadKey) ?? threadWorktreeGroupKey(shell, logicalProjectKeyOf(shell)))
+        : null;
+      const orderedKeys = orderedThreadKeysRef.current.filter((key) => {
+        const candidate = threadByKeyRef.current.get(key);
+        return (
+          !shell ||
+          (candidate &&
+            (groupKeys.get(key) ??
+              threadWorktreeGroupKey(candidate, logicalProjectKeyOf(candidate))) === groupKey)
+        );
+      });
       const settledKeys = settledThreadKeysRef.current;
       const snoozedKeys = snoozedThreadKeysRef.current;
       const currentIndex = orderedKeys.indexOf(threadKey);
@@ -3232,7 +3441,7 @@ export default function Sidebar() {
               void handleNewThreadRef.current(scopeProjectRef(shell.environmentId, shell.projectId))
           : () => void router.navigate({ to: "/" });
     },
-    [navigateToThread, router],
+    [logicalProjectKeyOf, navigateToThread, router],
   );
 
   const attemptSettle = useCallback(
@@ -3343,9 +3552,13 @@ export default function Sidebar() {
   const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   const contextDragKeyRef = useRef<string | null>(null);
+  const filingOriginXRef = useRef<number | null>(null);
+  const [isFilingDrag, setIsFilingDrag] = useState(false);
   const finishThreadDrag = useCallback((started: boolean) => {
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
+    filingOriginXRef.current = null;
+    setIsFilingDrag(false);
     endThreadContextDrag();
     if (started) {
       listMotionRef.current?.release();
@@ -3375,6 +3588,14 @@ export default function Sidebar() {
   }, []);
   const moveThreadContextDrag = useCallback(
     (point: { x: number; y: number }) => {
+      const active = threadByKeyRef.current.get(contextDragKeyRef.current ?? "");
+      setIsFilingDrag(
+        !pointerOutsideThreadList(point) &&
+          filingOriginXRef.current !== null &&
+          point.x - filingOriginXRef.current > 32 &&
+          active !== undefined &&
+          serverConfigs.get(active.environmentId)?.environment.capabilities.threadFiling === true,
+      );
       const contextDrag = pointerOutsideThreadList(point);
       setDragState((current) =>
         current === null || current.contextDrag === contextDrag
@@ -3391,16 +3612,52 @@ export default function Sidebar() {
       moveThreadContextDragGhost(point, { title, count: threads.length });
       return true;
     },
-    [contextDragThreads, pointerOutsideThreadList],
+    [contextDragThreads, pointerOutsideThreadList, serverConfigs],
   );
   const dropThreadContextDrag = useCallback(
     (point: { x: number; y: number }) => {
-      if (!pointerOutsideThreadList(point)) return false;
+      if (!pointerOutsideThreadList(point)) {
+        const active = threadByKeyRef.current.get(contextDragKeyRef.current ?? "");
+        if (
+          active &&
+          filingOriginXRef.current !== null &&
+          point.x - filingOriginXRef.current > 32 &&
+          serverConfigs.get(active.environmentId)?.environment.capabilities.threadFiling
+        ) {
+          const activeKey = contextDragKeyRef.current;
+          const targetKey = document
+            .elementsFromPoint(point.x, point.y)
+            .map(
+              (element) =>
+                element.closest<HTMLElement>("[data-sidebar-thread-key]")?.dataset.sidebarThreadKey,
+            )
+            .find((key) => key !== undefined && key !== activeKey);
+          const target = targetKey ? threadByKeyRef.current.get(targetKey) : undefined;
+          if (
+            target &&
+            sidebarFilingCandidates(active, threads).some((candidate) => candidate.id === target.id)
+          ) {
+            void updateThreadMetadata({
+              environmentId: active.environmentId,
+              input: { threadId: active.id, filedUnderThreadId: target.id },
+            }).then((result) => {
+              if (result._tag === "Failure")
+                toastManager.add({
+                  type: "error",
+                  title: "Could not file thread",
+                  description: "The parent may have changed. Try again.",
+                });
+            });
+          }
+          return true;
+        }
+        return false;
+      }
       dropThreadContext(point, contextDragThreads());
       // Releasing outside the list never reorders, whether or not a composer took the drop.
       return true;
     },
-    [contextDragThreads, pointerOutsideThreadList],
+    [contextDragThreads, pointerOutsideThreadList, serverConfigs, threads, updateThreadMetadata],
   );
   const dndSensors = useSensors(
     useSensor(SidebarPointerSensor, {
@@ -3552,6 +3809,8 @@ export default function Sidebar() {
   const handleThreadDragStart = useCallback(
     (event: DragStartEvent) => {
       const activeKey = String(event.active.id);
+      filingOriginXRef.current =
+        event.activatorEvent instanceof PointerEvent ? event.activatorEvent.clientX : null;
       contextDragKeyRef.current = activeKey;
       const activeSection = sectionByThreadKey.get(activeKey);
       if (activeSection === undefined) return;
@@ -3604,9 +3863,22 @@ export default function Sidebar() {
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
     items.push({ kind: "marker", marker: "pinned-divider" });
-    const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
-    items.push(...activeRows);
+    for (const group of activeBranchGroups) {
+      items.push({ kind: "marker", marker: `branch:${group.key}` });
+      items.push(
+        ...rowsOf(
+          collapsedBranchGroups.has(group.key)
+            ? group.threads.filter(
+                (thread) =>
+                  scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
+                  routeThreadKey,
+              )
+            : group.threads,
+          "active",
+        ),
+      );
+    }
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
@@ -3622,6 +3894,9 @@ export default function Sidebar() {
     return items;
   }, [
     activeThreads,
+    activeBranchGroups,
+    collapsedBranchGroups,
+    routeThreadKey,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
@@ -3708,7 +3983,7 @@ export default function Sidebar() {
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
-        enabled: !isContextDrag,
+        enabled: !isContextDrag && !isFilingDrag,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
         ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
@@ -3721,6 +3996,7 @@ export default function Sidebar() {
       draggedActiveOrder,
       draggedSettledOrder,
       isContextDrag,
+      isFilingDrag,
       routeThreadKey,
       settledShelfExpanded,
       settledVisibleCount,
@@ -3873,6 +4149,18 @@ export default function Sidebar() {
           }
           return false;
         };
+        if (activeThread.filedUnderThreadId != null && plan.kind !== "settle") {
+          if (
+            !(await run(
+              updateThreadMetadata({
+                environmentId: activeThread.environmentId,
+                input: { threadId: activeThread.id, filedUnderThreadId: null },
+              }),
+              "Failed to move thread out of parent",
+            ))
+          )
+            return;
+        }
         switch (plan.kind) {
           case "settle": {
             settlingThreadKeysRef.current.add(activeKey);
@@ -3960,6 +4248,7 @@ export default function Sidebar() {
       unsettleThread,
       unsnoozeThread,
       workingShelfEnabled,
+      updateThreadMetadata,
     ],
   );
   // One snooze per thread at a time — same double-dispatch guard as settle.
@@ -4308,6 +4597,15 @@ export default function Sidebar() {
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
+              ...(serverConfigs.get(thread.environmentId)?.environment.capabilities.threadFiling
+                ? {
+                    filing: {
+                      parentThreadId: thread.filedUnderThreadId ?? null,
+                      candidates: sidebarFilingCandidates(thread, threads),
+                    },
+                  }
+                : {}),
+              sideConversations: sideConversationsForThread(threads, threadRef),
               branch: thread.branch ?? null,
               projectFilter: threadProjectGroup
                 ? {
@@ -4341,6 +4639,30 @@ export default function Sidebar() {
               ? await requestCustomSnooze()
               : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
           if (preset) attemptSnooze(threadRef, preset);
+          return;
+        }
+        if (clicked.value?.startsWith("file:") || clicked.value === "unfile") {
+          const result = await updateThreadMetadata({
+            environmentId: thread.environmentId,
+            input: {
+              threadId: thread.id,
+              filedUnderThreadId:
+                clicked.value === "unfile" ? null : ThreadId.make(clicked.value.slice(5)),
+            },
+          });
+          if (result._tag === "Failure")
+            toastManager.add({
+              type: "error",
+              title: "Could not file thread",
+              description: "The parent may have changed. Try again.",
+            });
+          return;
+        }
+        if (clicked.value?.startsWith("open-side:")) {
+          useRightPanelStore
+            .getState()
+            .openSideConversation(threadRef, ThreadId.make(clicked.value.slice(10)));
+          await navigateToThread(threadRef);
           return;
         }
         switch (clicked.value) {
@@ -4543,6 +4865,8 @@ export default function Sidebar() {
       setThreadAutoSettle,
       startThreadRename,
       updateThreadMetadata,
+      threads,
+      navigateToThread,
       timestampFormat,
     ],
   );
@@ -4582,7 +4906,7 @@ export default function Sidebar() {
       if (traversalDirection !== null) {
         navigateToThreadKey(
           resolveAdjacentThreadId({
-            threadIds: orderedThreadKeys,
+            threadIds: branchNavigationKeys,
             currentThreadId: routeThreadKey,
             direction: traversalDirection,
           }),
@@ -4591,14 +4915,14 @@ export default function Sidebar() {
       }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
       if (jumpIndex === null) return;
-      navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
+      navigateToThreadKey(branchNavigationKeys[jumpIndex] ?? null);
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
     keybindings,
     navigateToThread,
-    orderedThreadKeys,
+    branchNavigationKeys,
     routeTerminalOpen,
     routeThreadKey,
     threadByKey,
@@ -4977,10 +5301,23 @@ export default function Sidebar() {
                                 .threadPinning === true
                             }
                             isPinned={thread.pinnedAt != null}
+                            sideConversationCount={
+                              sideConversationSummaryByOwnerKey.get(threadKey)?.count ?? 0
+                            }
+                            sideConversationNeedsAttention={
+                              sideConversationSummaryByOwnerKey.get(threadKey)?.needsAttention ??
+                              false
+                            }
+                            onOpenSideConversations={openOwnedSideConversation}
                             sortable={sortable}
                             dropVerb={
                               dragState?.activeKey === threadKey
-                                ? resolveSidebarDropVerb(dragState.activeSection, dragTargetSection)
+                                ? isFilingDrag
+                                  ? "file"
+                                  : resolveSidebarDropVerb(
+                                      dragState.activeSection,
+                                      dragTargetSection,
+                                    )
                                 : null
                             }
                             dragOverPinned={
@@ -5084,6 +5421,38 @@ export default function Sidebar() {
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          continue;
+                        }
+                        if (item.marker.startsWith("branch:")) {
+                          const group = activeBranchGroupByKey.get(item.marker.slice(7));
+                          const first = group?.threads[0];
+                          if (group && first)
+                            items.push(
+                              <li key={item.marker} className="list-none">
+                                <button
+                                  type="button"
+                                  aria-expanded={!collapsedBranchGroups.has(group.key)}
+                                  onClick={() =>
+                                    setCollapsedBranchGroups((current) => {
+                                      const next = new Set(current);
+                                      if (next.has(group.key)) next.delete(group.key);
+                                      else next.add(group.key);
+                                      return next;
+                                    })
+                                  }
+                                  className="flex min-h-8 w-full items-center gap-2 px-2.5 text-left text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  <GitBranchIcon className="size-3" aria-hidden />
+                                  <span className="min-w-0 flex-1 truncate">
+                                    {projectDisplayNameByKey.get(
+                                      `${first.environmentId}:${first.projectId}`,
+                                    )}{" "}
+                                    · {first.branch ?? "Local checkout"}
+                                  </span>
+                                  <span>{group.threads.length}</span>
+                                </button>
+                              </li>,
+                            );
                           continue;
                         }
                         switch (item.marker) {

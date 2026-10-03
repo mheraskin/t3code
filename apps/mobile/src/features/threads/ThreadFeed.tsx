@@ -1,3 +1,4 @@
+import { useEnvironmentServerConfig } from "../../state/entities";
 import { ThreadContextDivider } from "./thread-context-divider";
 import { ThreadHandoffRow } from "./thread-handoff-row";
 import {
@@ -308,6 +309,7 @@ async function waitForThreadShell(
 
 function AssistantForkButton(props: {
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly iconColor: ColorValue;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly sourceTitle: string;
@@ -325,44 +327,72 @@ function AssistantForkButton(props: {
     capabilities: support.providerSession?.capabilities,
   });
   const runId = props.projectedItem.item.runId;
+  const serverConfig = useEnvironmentServerConfig(props.environmentId);
+  const sideSupported =
+    serverConfig?.environment.capabilities.threadSideConversations === true &&
+    props.projectedItem.sourceThreadId === props.threadId;
 
   if (!canFork || runId === null) return null;
+
+  const startFork = (side: boolean) => {
+    const targetThreadId = ThreadId.make(uuidv4());
+    setBusy(true);
+    void Haptics.selectionAsync();
+    void forkFromRun({
+      environmentId: props.environmentId,
+      input: {
+        sourceThreadId: props.projectedItem.sourceThreadId,
+        targetThreadId,
+        runId,
+        title: `${props.sourceTitle} ${side ? "side conversation" : "fork"}`,
+        creationSource: "mobile",
+        ...(side ? { presentation: "side" as const } : {}),
+      },
+    })
+      .then(async (result) => {
+        if (result._tag !== "Success") return;
+        const targetThreadReady = await waitForThreadShell(props.environmentId, targetThreadId);
+        if (!targetThreadReady) {
+          Alert.alert(
+            side ? "Side conversation created" : "Fork created",
+            side
+              ? "Reconnect and open it from its parent conversation."
+              : "Its thread data did not reach this client. Reconnect and try opening it from the thread list.",
+          );
+          return;
+        }
+        navigation.navigate("Thread", {
+          environmentId: props.environmentId,
+          threadId: targetThreadId,
+        });
+      })
+      .finally(() => setBusy(false));
+  };
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Fork from this response"
+      accessibilityLabel={
+        sideSupported
+          ? "Start side conversation or fork from this response"
+          : "Fork from this response"
+      }
       disabled={busy}
+      hitSlop={8}
       onPress={() => {
-        const targetThreadId = ThreadId.make(uuidv4());
-        setBusy(true);
-        void Haptics.selectionAsync();
-        void forkFromRun({
-          environmentId: props.environmentId,
-          input: {
-            sourceThreadId: props.projectedItem.sourceThreadId,
-            targetThreadId,
-            runId,
-            title: `${props.sourceTitle} fork`,
-            creationSource: "mobile",
-          },
-        })
-          .then(async (result) => {
-            if (result._tag !== "Success") return;
-            const targetThreadReady = await waitForThreadShell(props.environmentId, targetThreadId);
-            if (!targetThreadReady) {
-              Alert.alert(
-                "Fork created",
-                "Its thread data did not reach this client. Reconnect and try opening it from the thread list.",
-              );
-              return;
-            }
-            navigation.navigate("Thread", {
-              environmentId: props.environmentId,
-              threadId: targetThreadId,
-            });
-          })
-          .finally(() => setBusy(false));
+        if (!sideSupported) {
+          startFork(false);
+          return;
+        }
+        Alert.alert(
+          "Fork from this response",
+          "A side conversation stays attached to its parent.",
+          [
+            { text: "Side conversation", onPress: () => startFork(true) },
+            { text: "Fork thread", onPress: () => startFork(false) },
+            { text: "Cancel", style: "cancel" },
+          ],
+        );
       }}
       className="h-7 w-7 items-center justify-center disabled:opacity-40"
     >
@@ -1876,6 +1906,7 @@ function renderFeedEntry(
             {message.projectedItem ? (
               <AssistantForkButton
                 environmentId={props.environmentId}
+                threadId={props.threadId}
                 iconColor={iconSubtleColor}
                 projectedItem={message.projectedItem}
                 sourceTitle={props.threadTitle}

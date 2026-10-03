@@ -24,7 +24,12 @@ import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { cn } from "../../lib/cn";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { T3KeyboardCommands } from "../../native/T3KeyboardCommands";
-import { useProjects, useThreadShell, useThreadShells } from "../../state/entities";
+import {
+  useEnvironmentServerConfig,
+  useProjects,
+  useThreadShell,
+  useThreadShells,
+} from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useWorkspaceEnvironments } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -61,6 +66,7 @@ const ACTION_ICONS: Record<string, AppSymbolName> = {
   terminal: "terminal",
   review: "arrow.triangle.pull",
   copyThreadReference: "link",
+  "thread.sideConversation": "text.bubble",
 };
 
 function itemIcon(item: CommandPaletteItem): AppSymbolName {
@@ -145,6 +151,11 @@ export function CommandPalette(props: {
   const threads = useThreadShells();
   const activeThreadRef = useMemo(() => parseActiveThreadPath(props.pathname), [props.pathname]);
   const activeThread = useThreadShell(activeThreadRef);
+  const config = useEnvironmentServerConfig(activeThreadRef?.environmentId ?? null);
+  const offersSideConversation =
+    activeThread !== null &&
+    config?.environment.capabilities.threadSideConversations === true &&
+    /^\/threads\/[^/]+\/[^/]+\/?$/.test(props.pathname);
   const environments = useWorkspaceEnvironments();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [query, setQuery] = useState("");
@@ -284,6 +295,15 @@ export function CommandPalette(props: {
       });
     }
     if (activeThreadRef) {
+      if (offersSideConversation) {
+        actions.push({
+          key: "thread.sideConversation",
+          kind: "action",
+          title: "Start side conversation",
+          searchTerms: ["side chat", "ask", "question", "fork"],
+          run: () => runCommand("thread.sideConversation"),
+        });
+      }
       const threadActions = [
         ["files", "Go to file", ["open", "files", "browse", "search"]],
         ["terminal", "Open terminal", ["shell", "console"]],
@@ -346,6 +366,7 @@ export function CommandPalette(props: {
     activeThread,
     activeThreadRef,
     navigation,
+    offersSideConversation,
     projects,
     runCommand,
     savedConnectionsById,

@@ -82,6 +82,10 @@ import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
+import {
+  MobileSideConversationToolbar,
+  useMobileSideConversationActions,
+} from "./sideConversations";
 import { threadRouteIsHydrating } from "./thread-route-hydration";
 
 function ThreadHeader(
@@ -336,6 +340,10 @@ function ThreadRouteContent(
   } = useThreadSelection();
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
+  const sideConversation = useMobileSideConversationActions({
+    thread: selectedThread,
+    projection: selectedThreadDetail,
+  });
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const composer = useThreadComposerState();
   const gitState = useSelectedThreadGitState();
@@ -987,6 +995,15 @@ function ThreadRouteContent(
     <>
       <GitActionProgressOverlay progress={gitActionProgress} onDismiss={dismissGitActionResult} />
 
+      <MobileSideConversationToolbar
+        thread={selectedThread}
+        projection={selectedThreadDetail}
+        busy={sideConversation.busy}
+        enabled={sideConversation.enabled}
+        onCreate={() => {
+          void sideConversation.open();
+        }}
+      />
       <View className="flex-1 bg-screen android:overflow-hidden android:rounded-t-[28px] android:bg-thread-canvas">
         <ThreadDetailScreen
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
@@ -1066,6 +1083,7 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={awaitingBootstrapTurn ? handleCancelWorktreeSetup : handleStopThread}
+          onOpenSideConversation={sideConversation.enabled ? sideConversation.open : undefined}
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           canSwitchThreadProvider={composer.canSwitchThreadProvider}
