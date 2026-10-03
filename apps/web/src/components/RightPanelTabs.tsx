@@ -11,6 +11,7 @@ import type {
   PreviewSessionSnapshot,
   ProjectId,
   PullRequestState,
+  ThreadId,
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
@@ -590,10 +591,11 @@ function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  conversationTitles: ReadonlyMap<ThreadId, string>,
 ): string {
   switch (surface.kind) {
-    case "side-conversation":
-      return "Side conversation";
+    case "conversation":
+      return conversationTitles.get(surface.resourceId) ?? surface.title ?? "Conversation";
     case "diff":
       return "Diff";
     case "files":
@@ -661,7 +663,7 @@ function SurfaceIcon({
   pullRequestStatusSeeds: Readonly<Record<string, PullRequestTabStatusSeed>> | undefined;
 }) {
   switch (surface.kind) {
-    case "side-conversation":
+    case "conversation":
       return <MessagesSquare className="size-3 shrink-0" />;
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
@@ -806,6 +808,16 @@ function PullRequestSurfaceIcon({
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
+  const threadShells = useThreadShells();
+  const conversationTitles = useMemo(
+    () =>
+      new Map(
+        threadShells
+          .filter((thread) => thread.environmentId === props.environmentId)
+          .map((thread) => [thread.id, thread.title]),
+      ),
+    [threadShells, props.environmentId],
+  );
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
@@ -1113,7 +1125,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
-              const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const title = surfaceTitle(
+                surface,
+                props.previewSessions,
+                props.terminalLabelsById,
+                conversationTitles,
+              );
               const previewTabId = previewTabIdOf(surface, props.previewSessions);
               // Desktop state is keyed by the session id, but desktop actions
               // must be addressed with the runtime id.

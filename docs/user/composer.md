@@ -40,13 +40,14 @@ after the command to open the side conversation and send it immediately. **Ask a
 response** starts from a specific response.
 
 A new side conversation uses context through a completed turn. If the main agent
-is working, its current unfinished turn is excluded. The context label shows
-whether the provider retained its native conversation or received portable
-context. Both conversations share the same workspace; approvals required does
+is working, its current unfinished turn is excluded. Both conversations share
+the same workspace; approvals required does
 not make the side conversation read-only.
 
 Closing the panel keeps its conversation and draft. Reopen it from the parent
-thread or its menu. **Promote** makes it a regular thread, **Archive** pauses its
+thread's **Lineage**. Side conversations start collapsed there; use **Show side
+conversations** in the Lineage menu to reveal them. Selecting a related fork or
+agent also opens that same conversation in the right panel. **Promote** makes it a regular thread, **Archive** pauses its
 use until **Unarchive**, and **Discard** deletes it. Side conversations require
 an updated server.
 

@@ -64,7 +64,7 @@ vi.mock("../composerDraftStore", () => ({
 vi.mock("../rightPanelStore", () => ({
   useRightPanelStore: {
     getState: () => ({
-      openSideConversation: (owner: ScopedThreadRef, childId: ThreadId) => {
+      openConversation: (owner: ScopedThreadRef, childId: ThreadId) => {
         testState.opened.push({ owner, childId });
       },
     }),

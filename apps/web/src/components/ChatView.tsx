@@ -1,4 +1,4 @@
-import { SideConversationPanel } from "./SideConversationPanel";
+import { ThreadConversationPanel } from "./ThreadConversationPanel";
 import { useSideConversation } from "../hooks/useSideConversation";
 import { parseComposerSideConversationCommand } from "@t3tools/shared/composerTrigger";
 import { ChatCanvas } from "./chat/ChatCanvas";
@@ -788,27 +788,27 @@ const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
 // Keep parent streaming updates from rerendering the child chat and composer.
-const SideConversationView = memo(function SideConversationView({
+const PanelConversationView = memo(function PanelConversationView({
   ownerRef,
   surface,
   visible,
   onClose,
 }: {
   ownerRef: ScopedThreadRef;
-  surface: Extract<RightPanelSurface, { kind: "side-conversation" }>;
+  surface: Extract<RightPanelSurface, { kind: "conversation" }>;
   visible: boolean;
   onClose: (surface: RightPanelSurface) => void;
 }) {
   const close = useCallback(() => onClose(surface), [onClose, surface]);
   return (
-    <SideConversationPanel ownerRef={ownerRef} threadId={surface.resourceId}>
+    <ThreadConversationPanel ownerRef={ownerRef} threadId={surface.resourceId}>
       <ChatView
         environmentId={ownerRef.environmentId}
         threadId={surface.resourceId}
         routeKind="server"
-        sidePanel={{ visible, onClose: close }}
+        conversationPanel={{ visible, onClose: close }}
       />
-    </SideConversationPanel>
+    </ThreadConversationPanel>
   );
 });
 
@@ -825,7 +825,7 @@ type ChatViewProps =
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
       routeKind: "server";
-      sidePanel?: { visible: boolean; onClose: () => void };
+      conversationPanel?: { visible: boolean; onClose: () => void };
       draftId?: never;
     }
   | {
@@ -835,7 +835,7 @@ type ChatViewProps =
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
       routeKind: "draft";
-      sidePanel?: never;
+      conversationPanel?: never;
       draftId: DraftId;
     };
 
@@ -1544,9 +1544,9 @@ export default function ChatView(props: ChatViewProps) {
     forceExpandedMobileComposer = false,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
-  const sidePanel = props.sidePanel;
-  const embedded = sidePanel !== undefined;
-  const visible = sidePanel?.visible ?? true;
+  const conversationPanel = props.conversationPanel;
+  const embedded = conversationPanel !== undefined;
+  const visible = conversationPanel?.visible ?? true;
   const handleNewThread = useNewThreadHandler();
   const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
   const routeThreadRef = useMemo(
@@ -5790,7 +5790,7 @@ export default function ChatView(props: ChatViewProps) {
       if (!activeThreadRef) return;
       const finishClose = () => {
         finishRightPanelSurfaceClose([surface]);
-        if (surface.kind === "side-conversation") scheduleComposerFocus();
+        if (surface.kind === "conversation") scheduleComposerFocus();
       };
       if (surface.kind === "preview") {
         closeAfterAgentBrowserConfirmation([surface], finishClose);
@@ -7607,10 +7607,10 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "rightPanel.close") {
         // Nothing open: leave the event alone so the shortcut keeps its
         // native meaning (close window on desktop, close tab in a browser).
-        if (sidePanel) {
+        if (conversationPanel) {
           event.preventDefault();
           event.stopPropagation();
-          if (!event.repeat) sidePanel.onClose();
+          if (!event.repeat) conversationPanel.onClose();
           return;
         }
         if (!activeRightPanelSurface) return;
@@ -7760,7 +7760,7 @@ export default function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     ownsEvent,
-    sidePanel,
+    conversationPanel,
     activeProject,
     activeRightPanelSurface,
     activeProjectScripts,
@@ -10455,8 +10455,8 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   const rightPanelContent = activeThreadRef ? (
-    renderedRightPanelSurface?.kind === "side-conversation" ? (
-      <SideConversationView
+    renderedRightPanelSurface?.kind === "conversation" ? (
+      <PanelConversationView
         key={`${activeThread.environmentId}:${renderedRightPanelSurface.resourceId}`}
         ownerRef={activeThreadRef}
         surface={renderedRightPanelSurface}
@@ -11122,7 +11122,7 @@ export default function ChatView(props: ChatViewProps) {
                                 isRevertingCheckpoint
                                   ? "Rewinding conversation"
                                   : embedded && activeThreadShell?.archivedAt != null
-                                    ? "Unarchive this side conversation before sending"
+                                    ? "Unarchive this conversation before sending"
                                     : feedbackUploading
                                       ? "Sending feedback"
                                       : threadDetailLoading

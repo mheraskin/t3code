@@ -27,21 +27,40 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("keeps an existing side conversation selected while upgrading its saved panel", () => {
+    const child = ThreadId.make("side-child");
+    const restored = migratePersistedRightPanelState({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "side:side-child",
+          surfaces: [
+            { id: "files", kind: "files" },
+            { id: "side:side-child", kind: "side-conversation", resourceId: child },
+          ],
+        },
+      },
+    });
+    expect(selectActiveRightPanelSurface(restored.byThreadKey, refA)).toEqual({
+      id: "conversation:side-child",
+      kind: "conversation",
+      resourceId: child,
+    });
+    expect(selectThreadRightPanelState(restored.byThreadKey, refA).isOpen).toBe(true);
+  });
   it("reopens independent side tabs per environment after closing and restoring panel state", () => {
     const child = ThreadId.make("side-child");
     const otherEnvironment = scopeThreadRef("env-2" as EnvironmentId, refA.threadId);
     const store = useRightPanelStore.getState();
-    store.openSideConversation(refA, child);
-    store.openSideConversation(refA, child);
+    store.openConversation(refA, child);
+    store.openConversation(refA, child);
     store.open(otherEnvironment, "diff");
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
-    ).toEqual([{ id: "side:side-child", kind: "side-conversation", resourceId: child }]);
+    ).toEqual([{ id: "conversation:side-child", kind: "conversation", resourceId: child }]);
     const restored = migratePersistedRightPanelState(useRightPanelStore.getState());
-    expect(selectActiveRightPanelSurface(restored.byThreadKey, refA)?.kind).toBe(
-      "side-conversation",
-    );
-    store.closeSurface(refA, "side:side-child");
+    expect(selectActiveRightPanelSurface(restored.byThreadKey, refA)?.kind).toBe("conversation");
+    store.closeSurface(refA, "conversation:side-child");
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
     ).toHaveLength(0);
@@ -49,7 +68,7 @@ describe("rightPanelStore", () => {
       selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, otherEnvironment)
         ?.kind,
     ).toBe("diff");
-    store.openSideConversation(refA, child);
+    store.openConversation(refA, child);
     expect(
       selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
     ).toMatchObject({ resourceId: child });
