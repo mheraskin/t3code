@@ -27,6 +27,7 @@ const prompt: PendingUserInput = {
 function renderPanel(pendingUserInput: PendingUserInput = prompt) {
   return renderToStaticMarkup(
     <ComposerPendingUserInputPanel
+      ownsEvent={() => true}
       pendingUserInputs={[pendingUserInput]}
       respondingRequestIds={[]}
       answers={{}}

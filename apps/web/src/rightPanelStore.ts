@@ -21,7 +21,7 @@ import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 
 const RIGHT_PANEL_KINDS = [
-  "side-conversation",
+  "conversation",
   "diff",
   "files",
   "file",
@@ -41,7 +41,7 @@ export interface DeviceTabTarget {
 }
 
 export type RightPanelSurface =
-  | { id: `side:${string}`; kind: "side-conversation"; resourceId: ThreadId }
+  | { id: `conversation:${string}`; kind: "conversation"; resourceId: ThreadId; title?: string }
   | { id: `browser:${string}`; kind: "preview"; resourceId: string }
   | { id: "browser:new"; kind: "preview"; resourceId: null }
   | { id: "device" | `device:${string}`; kind: "device"; target?: DeviceTabTarget; title?: string }
@@ -94,7 +94,8 @@ const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
 // v12 adds the device surface.
 // v14 removes the agents surface; lineage lives in the thread title bar.
-const RIGHT_PANEL_STORAGE_VERSION = 14;
+// v15 lets any related conversation open beside its owner.
+const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 /** A fixed workspace-level ref: each PR surface carries its own real environment. */
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
@@ -137,11 +138,11 @@ interface RightPanelStoreState {
   ) => boolean;
   open: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "side-conversation">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "conversation">,
   ) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
-  openSideConversation: (ref: ScopedThreadRef, threadId: ThreadId) => void;
+  openConversation: (ref: ScopedThreadRef, threadId: ThreadId, title?: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
@@ -177,7 +178,7 @@ interface RightPanelStoreState {
   toggleVisibility: (ref: ScopedThreadRef) => void;
   toggle: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "side-conversation">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "conversation">,
   ) => void;
   setThreadPanelOpen: (
     ref: ScopedThreadRef,
@@ -200,10 +201,7 @@ const DEFAULT_THREAD_PANEL_VISIBILITY: ThreadPanelVisibility = {
 };
 
 const singletonSurface = (
-  kind: Exclude<
-    RightPanelKind,
-    "file" | "preview" | "terminal" | "pull-request" | "side-conversation"
-  >,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "conversation">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -445,6 +443,21 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                     // Removed surfaces: plans render inline, agents in thread lineage.
                     const kind = (surface as { kind?: string }).kind;
                     if (kind === "plan" || kind === "agents") return [];
+                    if (kind === "side-conversation" || kind === "conversation") {
+                      if (!("resourceId" in surface) || typeof surface.resourceId !== "string")
+                        return [];
+                      const resourceId = ThreadId.make(surface.resourceId);
+                      return [
+                        {
+                          id: `conversation:${resourceId}`,
+                          kind: "conversation",
+                          resourceId,
+                          ...("title" in surface && typeof surface.title === "string"
+                            ? { title: surface.title }
+                            : {}),
+                        },
+                      ];
+                    }
                     if (surface.kind === "file") {
                       const revealLine =
                         typeof surface.revealLine === "number" &&
@@ -513,10 +526,14 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                   })
                 : [];
               const rawActiveSurfaceId = validThreadState?.activeSurfaceId;
+              const requestedActiveSurfaceId =
+                typeof rawActiveSurfaceId === "string" && rawActiveSurfaceId.startsWith("side:")
+                  ? `conversation:${rawActiveSurfaceId.slice(5)}`
+                  : rawActiveSurfaceId;
               const persistedActiveSurfaceId = surfaces.some(
-                (surface) => surface.id === rawActiveSurfaceId,
+                (surface) => surface.id === requestedActiveSurfaceId,
               )
-                ? (rawActiveSurfaceId ?? null)
+                ? (requestedActiveSurfaceId ?? null)
                 : rawActiveSurfaceId === "pull-request"
                   ? (surfaces.find((surface) => surface.kind === "pull-request")?.id ?? null)
                   : null;
@@ -646,13 +663,14 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           })),
         ),
-      openSideConversation: (ref, threadId) =>
+      openConversation: (ref, threadId, title) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) =>
             upsertSurface(current, {
-              id: `side:${threadId}`,
-              kind: "side-conversation",
+              id: `conversation:${threadId}`,
+              kind: "conversation",
               resourceId: threadId,
+              ...(title === undefined ? {} : { title }),
             }),
           ),
         ),

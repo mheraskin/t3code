@@ -188,7 +188,7 @@ export function useThreadActionMenu(input: {
         if (action.startsWith("open-side:")) {
           useRightPanelStore
             .getState()
-            .openSideConversation(threadRef, ThreadId.make(action.slice(10)));
+            .openConversation(threadRef, ThreadId.make(action.slice(10)));
           return;
         }
         if (action.startsWith("snooze:")) {

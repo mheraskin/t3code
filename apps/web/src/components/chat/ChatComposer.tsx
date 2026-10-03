@@ -6655,6 +6655,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   </ComposerBanner.Row>
                 ) : !isComposerCollapsedMobile && pendingUserInputs.length > 0 ? (
                   <ComposerPendingUserInputPanel
+                    ownsEvent={ownsEvent}
                     pendingUserInputs={pendingUserInputs}
                     respondingRequestIds={
                       activePendingIsResponding && activePendingUserInput
@@ -6675,6 +6676,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 ) : isComposerCollapsedMobile && pendingUserInputs.length > 0 ? (
                   <div data-chat-composer-collapsed-controls="true">
                     <ComposerPendingUserInputPanel
+                      ownsEvent={ownsEvent}
                       pendingUserInputs={pendingUserInputs}
                       respondingRequestIds={
                         activePendingIsResponding && activePendingUserInput

@@ -46,10 +46,18 @@ import {
 } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useRightPanelStore } from "../../rightPanelStore";
 import { AgentElapsed } from "./AgentElapsed";
 import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadRelationshipIcon";
 
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS,
@@ -107,13 +115,19 @@ export function ThreadLineageRowList(props: {
   );
 }
 
-function ThreadLineageGroup(props: {
-  readonly label: string | null;
-  readonly rows: ReadonlyArray<ThreadRelationshipWalkRow>;
-  readonly expanded: boolean;
-  readonly children: (rows: ReadonlyArray<ThreadRelationshipWalkRow>) => ReactNode;
-}) {
-  const [expanded, setExpanded] = useState(props.expanded);
+function ThreadLineageGroup(
+  props: {
+    readonly label: string | null;
+    readonly rows: ReadonlyArray<ThreadRelationshipWalkRow>;
+    readonly children: (rows: ReadonlyArray<ThreadRelationshipWalkRow>) => ReactNode;
+  } & (
+    | { defaultExpanded: boolean; expanded?: never; onExpandedChange?: never }
+    | { defaultExpanded?: never; expanded: boolean; onExpandedChange: (expanded: boolean) => void }
+  ),
+) {
+  const [localExpanded, setLocalExpanded] = useState(props.defaultExpanded ?? false);
+  const expanded = props.expanded ?? localExpanded;
+  const setExpanded = props.onExpandedChange ?? setLocalExpanded;
   const [visibleCount, setVisibleCount] = useState(THREAD_LINEAGE_INITIAL_COUNT);
   const { visibleRows, hiddenCount } = resolveThreadLineageWindow(props.rows, visibleCount);
   const failedCount = props.rows.filter(
@@ -167,6 +181,11 @@ export function ThreadRelationshipsPanel(props: {
   readonly threadId: ThreadId;
 }) {
   const ref = scopeThreadRef(props.environmentId, props.threadId);
+  const threadKey = scopedThreadKey(ref);
+  const [sideVisibility, setSideVisibility] = useState({ owner: threadKey, expanded: false });
+  const showSideConversations = sideVisibility.owner === threadKey && sideVisibility.expanded;
+  const setShowSideConversations = (expanded: boolean) =>
+    setSideVisibility({ owner: threadKey, expanded });
   const projection = useThreadProjection(ref)?.projection ?? null;
   const providers = useServerConfigs().get(props.environmentId)?.providers;
   const subagentsByThreadId = useMemo(
@@ -225,7 +244,14 @@ export function ThreadRelationshipsPanel(props: {
     related = [],
     active = [],
     previous = [],
-  } = groupBy(relationshipRows, ({ edge }) => {
+    sides = [],
+  } = groupBy(relationshipRows, ({ threadId, edge }) => {
+    if (
+      edge.kind === "fork" &&
+      !isParentThreadRelationship(edge, props.threadId) &&
+      graph.nodes.get(threadId)?.thread?.presentation?.kind === "side"
+    )
+      return "sides";
     if (edge.kind !== "subagent" || isParentThreadRelationship(edge, props.threadId))
       return "related";
     return ["completed", "failed", "error", "cancelled", "interrupted", "idle"].includes(
@@ -235,10 +261,17 @@ export function ThreadRelationshipsPanel(props: {
       : "active";
   });
   const groups = [
-    { id: "related", label: null, rows: related, expanded: true },
-    { id: "active", label: null, rows: active, expanded: true },
-    { id: "previous", label: "Previous agents", rows: previous, expanded: false },
-  ];
+    { id: "related", label: null, rows: related, defaultExpanded: true },
+    { id: "active", label: null, rows: active, defaultExpanded: true },
+    { id: "previous", label: "Previous agents", rows: previous, defaultExpanded: false },
+    {
+      id: "sides",
+      label: "Side conversations",
+      rows: sides,
+      expanded: showSideConversations,
+      onExpandedChange: setShowSideConversations,
+    },
+  ] as const;
   const runningCount =
     projection?.subagents.filter((agent) => agent.status === "running").length ??
     active.filter(({ edge }) => edge.status === "running").length;
@@ -248,10 +281,9 @@ export function ThreadRelationshipsPanel(props: {
   }
 
   const openThread = (threadId: ThreadId) => {
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(scopeThreadRef(props.environmentId, threadId)),
-    });
+    const panel = useRightPanelStore.getState();
+    panel.openConversation(ref, threadId, graph.nodes.get(threadId)?.thread?.title);
+    panel.setThreadPanelOpen(ref, "popover", false);
   };
 
   const merge = async () => {
@@ -266,7 +298,11 @@ export function ThreadRelationshipsPanel(props: {
       },
     });
     setBusyAction(null);
-    if (result._tag === "Success") openThread(mergeTargetThreadId);
+    if (result._tag === "Success")
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(props.environmentId, mergeTargetThreadId)),
+      });
   };
 
   const detach = async () => {
@@ -291,30 +327,38 @@ export function ThreadRelationshipsPanel(props: {
       data-thread-relationships-panel
       collapsible
       actions={
-        canDetach ? (
-          <Menu>
-            <MenuTrigger
-              render={
-                <ThreadDetailsControl
-                  size="icon-xs"
-                  variant="ghost"
-                  part="icon"
-                  aria-label="Agent session actions"
-                  title="Agent session actions"
-                  disabled={busyAction !== null}
-                />
-              }
+        <Menu>
+          <MenuTrigger
+            render={
+              <ThreadDetailsControl
+                size="icon-xs"
+                variant="ghost"
+                part="icon"
+                aria-label="Lineage options"
+                title="Lineage options"
+              />
+            }
+          >
+            <MoreHorizontalIcon className="size-3.5" />
+          </MenuTrigger>
+          <MenuPopup align="end" className="min-w-60 max-w-(--available-width)">
+            <MenuCheckboxItem
+              checked={showSideConversations}
+              onCheckedChange={setShowSideConversations}
             >
-              <MoreHorizontalIcon className="size-3.5" />
-            </MenuTrigger>
-            <MenuPopup align="end" className="min-w-60 max-w-(--available-width)">
-              <MenuItem onClick={() => void detach()}>
-                <UnplugIcon className="size-3.5" />
-                Disconnect agent session
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-        ) : null
+              Show side conversations
+            </MenuCheckboxItem>
+            {canDetach ? (
+              <>
+                <MenuSeparator />
+                <MenuItem disabled={busyAction !== null} onClick={() => void detach()}>
+                  <UnplugIcon className="size-3.5" />
+                  Disconnect agent session
+                </MenuItem>
+              </>
+            ) : null}
+          </MenuPopup>
+        </Menu>
       }
     >
       {groups.map((group) => (
@@ -346,7 +390,7 @@ export function ThreadRelationshipsPanel(props: {
               const project = projects.find((project) => project.id === node?.thread?.projectId);
               const relationshipHint = node?.missing
                 ? "This related thread is unavailable"
-                : `Open ${relationship.toLowerCase()} in this chat`;
+                : `Open ${relationship.toLowerCase()} in the right panel`;
               const RelationshipPopup = agent ? ThreadHoverCardPopup : TooltipPopup;
               const relationshipTooltip = agent ? (
                 <SubagentTooltipContent

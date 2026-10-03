@@ -83,7 +83,7 @@ export function useSideConversation(ownerRef: ScopedThreadRef) {
             });
           }
         }
-        useRightPanelStore.getState().openSideConversation(sourceRef, threadId);
+        useRightPanelStore.getState().openConversation(sourceRef, threadId);
         return ref;
       } finally {
         inFlight.current = false;

@@ -20,7 +20,7 @@ import { useRightPanelStore } from "../rightPanelStore";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { Button } from "./ui/button";
 
-export function SideConversationPanel({
+export function ThreadConversationPanel({
   ownerRef,
   threadId,
   children,
@@ -35,6 +35,7 @@ export function SideConversationPanel({
   );
   const state = useEnvironmentThread(ref.environmentId, threadId);
   const shell = useThreadShell(ref);
+  const isSideConversation = shell?.source.presentation?.kind === "side";
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +45,8 @@ export function SideConversationPanel({
   const unarchive = useAtomCommand(threadEnvironment.unarchive, { reportFailure: false });
   const remove = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const connected = state.status === "live";
-  const close = () => useRightPanelStore.getState().closeSurface(ownerRef, `side:${threadId}`);
+  const close = () =>
+    useRightPanelStore.getState().closeSurface(ownerRef, `conversation:${threadId}`);
   const openFullConversation = () =>
     void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
   const run = async <A, E>(
@@ -69,7 +71,7 @@ export function SideConversationPanel({
   if (state.status === "deleted" || shell?.deletedAt)
     return (
       <div className="p-4 text-sm">
-        This side conversation was deleted.
+        This conversation was deleted.
         <Button variant="ghost" onClick={close}>
           Close
         </Button>
@@ -77,10 +79,10 @@ export function SideConversationPanel({
     );
   return (
     <section
-      data-side-conversation="true"
+      data-conversation-panel="true"
       data-chat-owner={scopedThreadKey(ref)}
       className="flex h-full min-h-0 flex-col"
-      aria-label="Side conversation"
+      aria-label={shell?.title ?? "Conversation"}
     >
       <div className="flex shrink-0 items-center justify-end gap-1 border-b px-2 py-1">
         <Button
@@ -93,63 +95,67 @@ export function SideConversationPanel({
         >
           <Maximize2Icon />
         </Button>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          title="Promote to full conversation"
-          aria-label="Promote to full conversation"
-          disabled={busy || !shell || !connected}
-          onClick={() =>
-            void run(
-              () =>
-                update({
-                  environmentId: ref.environmentId,
-                  input: { threadId, presentation: { kind: "standard" } },
-                }),
-              () => {
-                close();
-                openFullConversation();
-              },
-            )
-          }
-        >
-          <ArrowUpRightIcon />
-        </Button>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          title={shell?.archivedAt ? "Unarchive" : "Archive"}
-          aria-label={
-            shell?.archivedAt ? "Unarchive side conversation" : "Archive side conversation"
-          }
-          disabled={busy || !shell || !connected}
-          onClick={() =>
-            void run(() =>
-              (shell?.archivedAt ? unarchive : archive)({
-                environmentId: ref.environmentId,
-                input: { threadId },
-              }),
-            )
-          }
-        >
-          {shell?.archivedAt ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
-        </Button>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          title="Discard side conversation"
-          aria-label="Discard side conversation"
-          disabled={busy || !connected}
-          onClick={() => {
-            if (window.confirm("Delete this side conversation and its history?"))
-              void run(
-                () => remove({ environmentId: ref.environmentId, input: { threadId } }),
-                close,
-              );
-          }}
-        >
-          <Trash2Icon />
-        </Button>
+        {isSideConversation ? (
+          <>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              title="Promote to full conversation"
+              aria-label="Promote to full conversation"
+              disabled={busy || !shell || !connected}
+              onClick={() =>
+                void run(
+                  () =>
+                    update({
+                      environmentId: ref.environmentId,
+                      input: { threadId, presentation: { kind: "standard" } },
+                    }),
+                  () => {
+                    close();
+                    openFullConversation();
+                  },
+                )
+              }
+            >
+              <ArrowUpRightIcon />
+            </Button>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              title={shell?.archivedAt ? "Unarchive" : "Archive"}
+              aria-label={
+                shell?.archivedAt ? "Unarchive side conversation" : "Archive side conversation"
+              }
+              disabled={busy || !shell || !connected}
+              onClick={() =>
+                void run(() =>
+                  (shell?.archivedAt ? unarchive : archive)({
+                    environmentId: ref.environmentId,
+                    input: { threadId },
+                  }),
+                )
+              }
+            >
+              {shell?.archivedAt ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
+            </Button>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              title="Discard side conversation"
+              aria-label="Discard side conversation"
+              disabled={busy || !connected}
+              onClick={() => {
+                if (window.confirm("Delete this side conversation and its history?"))
+                  void run(
+                    () => remove({ environmentId: ref.environmentId, input: { threadId } }),
+                    close,
+                  );
+              }}
+            >
+              <Trash2Icon />
+            </Button>
+          </>
+        ) : null}
       </div>
       {error ? (
         <p role="alert" className="px-3 py-1 text-xs text-destructive">

@@ -11,6 +11,7 @@ import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 
 interface PendingUserInputPanelProps {
+  ownsEvent: (event: Event) => boolean;
   pendingUserInputs: PendingUserInput[];
   respondingRequestIds: RuntimeRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
@@ -21,6 +22,7 @@ interface PendingUserInputPanelProps {
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
+  ownsEvent,
   pendingUserInputs,
   respondingRequestIds,
   answers,
@@ -35,6 +37,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
 
   return (
     <ComposerPendingUserInputCard
+      ownsEvent={ownsEvent}
       key={activePrompt.requestId}
       prompt={activePrompt}
       isResponding={respondingRequestIds.includes(activePrompt.requestId)}
@@ -48,6 +51,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
 });
 
 const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
+  ownsEvent,
   prompt,
   isResponding,
   answers,
@@ -56,6 +60,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onAdvance,
   onDismiss,
 }: {
+  ownsEvent: (event: Event) => boolean;
   prompt: PendingUserInput;
   isResponding: boolean;
   answers: Record<string, PendingUserInputDraftAnswer>;
@@ -144,13 +149,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   useEffect(() => {
     if (!activeQuestion || responseDisabled || isCollapsed) return;
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (
-        (event.target instanceof Element &&
-          event.target.closest('[data-side-conversation="true"]')) ||
-        (event.target === document.body &&
-          document.activeElement?.closest('[data-side-conversation="true"]'))
-      )
-        return;
+      if (!ownsEvent(event)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
@@ -173,7 +172,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, handleOptionSelection, isCollapsed, responseDisabled]);
+  }, [activeQuestion, handleOptionSelection, isCollapsed, ownsEvent, responseDisabled]);
 
   if (!activeQuestion) {
     return null;

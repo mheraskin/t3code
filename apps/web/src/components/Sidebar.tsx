@@ -3242,7 +3242,7 @@ export default function Sidebar() {
     (ref: ScopedThreadRef) => {
       const summary = sideConversationSummaryByOwnerKeyRef.current.get(scopedThreadKey(ref));
       if (!summary) return;
-      useRightPanelStore.getState().openSideConversation(ref, summary.firstThreadId);
+      useRightPanelStore.getState().openConversation(ref, summary.firstThreadId);
       void navigateToThread(ref);
     },
     [navigateToThread],
@@ -4661,7 +4661,7 @@ export default function Sidebar() {
         if (clicked.value?.startsWith("open-side:")) {
           useRightPanelStore
             .getState()
-            .openSideConversation(threadRef, ThreadId.make(clicked.value.slice(10)));
+            .openConversation(threadRef, ThreadId.make(clicked.value.slice(10)));
           await navigateToThread(threadRef);
           return;
         }

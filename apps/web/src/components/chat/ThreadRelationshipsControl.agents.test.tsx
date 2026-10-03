@@ -3,6 +3,8 @@ import { create, type ReactTestRenderer } from "react-test-renderer";
 import { EnvironmentId, ThreadId, type OrchestrationV2ContextTransfer } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { afterEach, expect, it, vi } from "vite-plus/test";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { selectActiveRightPanelSurface, useRightPanelStore } from "../../rightPanelStore";
 
 const state = vi.hoisted(() => ({
   projection: null as unknown,
@@ -11,6 +13,7 @@ const state = vi.hoisted(() => ({
   projects: [] as unknown[],
   configs: new Map<string, unknown>(),
   showTooltips: false,
+  showMenus: false,
 }));
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
@@ -30,6 +33,36 @@ vi.mock("../ui/tooltip", () => ({
     cloneElement(render, {}, children),
   TooltipPopup: ({ children }: { children: ReactNode }) => (state.showTooltips ? children : null),
 }));
+vi.mock("../ui/menu", () => ({
+  Menu: ({ children }: { children: ReactNode }) => children,
+  MenuTrigger: ({ render, children }: { render: ReactElement; children: ReactNode }) =>
+    cloneElement(render, {}, children),
+  MenuPopup: ({ children }: { children: ReactNode }) => (state.showMenus ? children : null),
+  MenuCheckboxItem: ({
+    checked,
+    onCheckedChange,
+    children,
+  }: {
+    checked: boolean;
+    onCheckedChange: (checked: boolean) => void;
+    children: ReactNode;
+  }) => (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      onClick={() => onCheckedChange(!checked)}
+    >
+      {children}
+    </button>
+  ),
+  MenuSeparator: () => null,
+  MenuItem: ({ children, onClick }: { children: ReactNode; onClick: () => void }) => (
+    <button type="button" role="menuitem" onClick={onClick}>
+      {children}
+    </button>
+  ),
+}));
 
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
@@ -42,6 +75,108 @@ afterEach(async () => {
   state.projects = [];
   state.configs.clear();
   state.showTooltips = false;
+  state.showMenus = false;
+  state.navigate.mockReset();
+  useRightPanelStore.setState({
+    byThreadKey: {},
+    threadPanelVisibilityByThreadKey: {},
+    userActionRevisionByThreadKey: {},
+  });
+});
+
+it("keeps sides folded while opening any related session beside the current conversation", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  state.showMenus = true;
+  const environmentId = EnvironmentId.make("test");
+  const ownerRef = scopeThreadRef(environmentId, ThreadId.make("current"));
+  const parent = {
+    id: "parent",
+    title: "Parent conversation",
+    lineage: { parentThreadId: null, relationshipToParent: null },
+  };
+  const current = {
+    id: "current",
+    title: "Current conversation",
+    lineage: { parentThreadId: "parent", relationshipToParent: "fork" },
+  };
+  const fork = {
+    id: "fork",
+    title: "Regular fork",
+    presentation: { kind: "standard" },
+    lineage: { parentThreadId: "current", relationshipToParent: "fork" },
+  };
+  const side = {
+    id: "side",
+    title: "Temporary side",
+    presentation: { kind: "side" },
+    lineage: { parentThreadId: "current", relationshipToParent: "fork" },
+  };
+  const agent = {
+    id: "worker",
+    title: "Worker",
+    lineage: { parentThreadId: "current", relationshipToParent: "subagent" },
+  };
+  state.shells = [parent, current, fork, side, agent].map((source) => ({ environmentId, source }));
+  state.projection = {
+    thread: { ...current, activeProviderThreadId: null },
+    runs: [],
+    providerThreads: [],
+    providerSessions: [],
+    contextTransfers: [],
+    subagents: [
+      {
+        id: "agent",
+        childThreadId: "worker",
+        driver: "codex",
+        providerInstanceId: "codex",
+        title: "Worker",
+        prompt: "Check",
+        model: "gpt-5.4",
+        status: "running",
+        startedAt: null,
+        completedAt: null,
+        updatedAt: DateTime.makeUnsafe("2026-10-03T12:00:00Z"),
+      },
+    ],
+  };
+  await act(async () => {
+    renderer = create(
+      <ThreadRelationshipsPanel environmentId={environmentId} threadId={ownerRef.threadId} />,
+    );
+  });
+  const text = () =>
+    renderer.root
+      .findAll((node) => typeof node.type === "string")
+      .flatMap((node) => node.children.filter((child) => typeof child === "string"))
+      .join(" ");
+  expect(text()).toContain("Parent conversation");
+  expect(text()).toContain("Regular fork");
+  expect(text()).toContain("Worker");
+  expect(text()).not.toContain("Temporary side");
+  const toggle = () => renderer.root.findByProps({ role: "menuitemcheckbox" }).props.onClick();
+  await act(async () => toggle());
+  expect(text()).toContain("Temporary side");
+  for (const [title, id] of [
+    ["Parent conversation", "parent"],
+    ["Regular fork", "fork"],
+    ["Worker", "worker"],
+    ["Temporary side", "side"],
+  ] as const) {
+    const row = renderer.root
+      .findAllByType("button")
+      .find((button) => button.findAllByType("span").some((span) => span.children.includes(title)));
+    expect(row).toBeDefined();
+    await act(async () => row?.props.onClick());
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, ownerRef),
+    ).toMatchObject({ kind: "conversation", resourceId: id });
+  }
+  expect(state.navigate).not.toHaveBeenCalled();
+  expect(side.presentation.kind).toBe("side");
+  await act(async () => toggle());
+  expect(text()).not.toContain("Temporary side");
+  expect(text()).toContain("Regular fork");
+  expect(text()).toContain("Worker");
 });
 
 it("shows the matching child agent details and refreshes them when the agent settles", async () => {
