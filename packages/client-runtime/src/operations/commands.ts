@@ -121,6 +121,8 @@ export interface VisitThreadInput extends ThreadCommandInput {
 export type MarkThreadUnreadInput = ThreadCommandInput;
 
 export interface UpdateThreadMetadataInput extends ThreadCommandInput {
+  readonly presentation?: { readonly kind: "standard" };
+  readonly filedUnderThreadId?: ThreadId | null;
   readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecoveryUpdate | null;
   readonly title?: string;
   readonly modelSelection?: ModelSelection;
@@ -215,6 +217,8 @@ export interface ForkThreadFromRunInput extends CommandMetadata {
   readonly targetThreadId: ThreadId;
   readonly runId: RunId;
   readonly title?: string;
+  readonly presentation?: "side";
+  readonly runtimeMode?: RuntimeMode;
 }
 
 export interface MergeThreadBackInput extends CommandMetadata {
@@ -562,13 +566,19 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
-      input.limitRecovery !== undefined
+      input.limitRecovery !== undefined ||
+      input.presentation !== undefined ||
+      input.filedUnderThreadId !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
         ...(input.limitRecovery === undefined ? {} : { limitRecovery: input.limitRecovery }),
         commandId,
         threadId: input.threadId,
+        ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+        ...(input.filedUnderThreadId === undefined
+          ? {}
+          : { filedUnderThreadId: input.filedUnderThreadId }),
         ...(input.title === undefined ? {} : { title: input.title }),
         ...(input.branch === undefined ? {} : { branch: input.branch }),
         ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
@@ -919,6 +929,8 @@ export const forkThreadFromRun = Effect.fn("EnvironmentCommands.forkThreadFromRu
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
     sourcePoint: { type: "run", runId: input.runId },
+    ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+    ...(input.runtimeMode === undefined ? {} : { runtimeMode: input.runtimeMode }),
     ...(input.title === undefined ? {} : { title: input.title }),
   });
 });

@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  CheckpointId,
   CommandId,
   MessageId,
   EventId,
@@ -47,6 +48,146 @@ const testLayer = Layer.mergeAll(
     ProviderAdapterRegistry.makeLayer([adapter]),
     { databaseLayer: database, runEffectWorker: false },
   ),
+);
+
+it.effect("persists side presentation, promotion and filing through ordinary V2 controls", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const projectId = ProjectId.make("project:side-controls");
+    const sourceId = ThreadId.make("thread:side-source");
+    const childId = ThreadId.make("thread:side-child");
+    const otherId = ThreadId.make("thread:side-other-project");
+    const emptyId = ThreadId.make("thread:side-empty");
+    for (const threadId of [sourceId, otherId, emptyId]) {
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create:${threadId}`),
+        threadId,
+        projectId: threadId === otherId ? ProjectId.make("project:other") : projectId,
+        title: "Side source",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+    }
+    const now = yield* DateTime.now;
+    const sourceRunId = RunId.make("run:side-stable");
+    for (const ordinal of [1, 2]) {
+      const runId = ordinal === 1 ? sourceRunId : RunId.make("run:side-active");
+      yield* projections.apply({
+        id: EventId.make(`event:side-run:${ordinal}`),
+        type: "run.created",
+        threadId: sourceId,
+        runId,
+        occurredAt: now,
+        payload: {
+          id: runId,
+          threadId: sourceId,
+          ordinal,
+          providerInstanceId: instanceId,
+          modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make(`message:side-run:${ordinal}`),
+          rootNodeId: null,
+          activeAttemptId: null,
+          status: ordinal === 1 ? "completed" : "running",
+          queuePosition: null,
+          requestedAt: now,
+          startedAt: now,
+          completedAt: ordinal === 1 ? now : null,
+          checkpointId: ordinal === 1 ? CheckpointId.make("checkpoint:side-stable") : null,
+          contextHandoffId: null,
+        },
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make("fork:side-controls"),
+      sourceThreadId: sourceId,
+      targetThreadId: childId,
+      sourcePoint: { type: "latest_stable" },
+      presentation: "side",
+      createdBy: "user",
+      creationSource: "mobile",
+    });
+    const child = yield* projections.getThreadProjection(childId);
+    assert.deepEqual(child.thread.presentation, { kind: "side", ownerThreadId: sourceId });
+    assert.equal(child.thread.runtimeMode, "approval-required");
+    assert.equal(child.contextTransfers[0]?.sourcePoint.runId, sourceRunId);
+    assert.lengthOf(child.runs, 0);
+    const shell = yield* projections.getThreadShell(childId);
+    assert.deepEqual(shell?.presentation, child.thread.presentation);
+    const snapshot = yield* projections.getShellSnapshot();
+    assert.deepEqual(
+      snapshot.threads.find((thread) => thread.id === childId)?.presentation,
+      child.thread.presentation,
+    );
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("promote:side-controls"),
+      threadId: childId,
+      presentation: { kind: "standard" },
+      filedUnderThreadId: sourceId,
+    });
+    const promoted = yield* projections.getThread(childId);
+    assert.deepEqual(promoted.presentation, { kind: "standard" });
+    assert.deepEqual(promoted.lineage, child.thread.lineage);
+    assert.equal(promoted.filedUnderThreadId, sourceId);
+    assert.equal((yield* projections.getThreadShell(childId))?.filedUnderThreadId, sourceId);
+    const rejectionInputs = [
+      { threadId: childId, filedUnderThreadId: childId },
+      { threadId: sourceId, filedUnderThreadId: childId },
+      { threadId: childId, filedUnderThreadId: otherId },
+    ];
+    for (const [index, input] of rejectionInputs.entries()) {
+      const error = yield* orchestrator
+        .dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make(`invalid-file:${index}`),
+          ...input,
+        })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "OrchestratorDispatchError");
+    }
+    const lastActivityAt = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+    yield* projections.apply({
+      id: EventId.make("event:side-earlier-activity"),
+      type: "thread.metadata-updated",
+      threadId: childId,
+      occurredAt: now,
+      payload: { ...promoted, updatedAt: lastActivityAt },
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("unfile:side-controls"),
+      threadId: childId,
+      filedUnderThreadId: null,
+    });
+    assert.isNull((yield* projections.getThread(childId)).filedUnderThreadId);
+    assert.equal(
+      DateTime.toEpochMillis((yield* projections.getThread(childId)).updatedAt),
+      DateTime.toEpochMillis(lastActivityAt),
+    );
+    const noStableRun = yield* orchestrator
+      .dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("fork:side-empty"),
+        sourceThreadId: emptyId,
+        targetThreadId: ThreadId.make("thread:side-unavailable"),
+        sourcePoint: { type: "latest_stable" },
+        presentation: "side",
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.flip);
+    assert.equal(noStableRun._tag, "OrchestratorDispatchError");
+    assert.isNull(yield* projections.getThreadShell(ThreadId.make("thread:side-unavailable")));
+  }).pipe(Effect.provide(testLayer)),
 );
 
 it.effect(

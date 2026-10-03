@@ -29,6 +29,7 @@ import {
   ScheduledTaskId,
   ThreadId,
   TrimmedNonEmptyString,
+  TurnId,
   TurnItemId,
 } from "./baseSchemas.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
@@ -105,6 +106,21 @@ export const OrchestrationV2AppThreadLineage = Schema.Struct({
   rootThreadId: ThreadId,
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
+
+export const OrchestrationV2ThreadPresentation = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("standard") }),
+  Schema.Struct({ kind: Schema.Literal("side"), ownerThreadId: ThreadId }),
+]);
+export type OrchestrationV2ThreadPresentation = typeof OrchestrationV2ThreadPresentation.Type;
+
+export const OrchestrationV2LegacyForkOrigin = Schema.Struct({
+  sourceThreadId: ThreadId,
+  sourceTurnId: Schema.NullOr(TurnId),
+  sourceMessageId: Schema.NullOr(MessageId),
+  sourceHead: Schema.optional(Schema.Literal(true)),
+  forkedAt: IsoDateTime,
+});
+export type OrchestrationV2LegacyForkOrigin = typeof OrchestrationV2LegacyForkOrigin.Type;
 
 export const OrchestrationV2ContextTransferType = Schema.Literals([
   "fork",
@@ -373,6 +389,9 @@ export const OrchestrationV2AppThread = Schema.Struct({
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
   lineage: OrchestrationV2AppThreadLineage,
+  presentation: Schema.optional(OrchestrationV2ThreadPresentation),
+  filedUnderThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  legacyFork: Schema.optional(OrchestrationV2LegacyForkOrigin),
   forkedFrom: Schema.NullOr(
     Schema.Union([
       Schema.Struct({ type: Schema.Literal("run"), threadId: ThreadId, runId: RunId }),
@@ -1698,6 +1717,9 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   /** Pull request discovered from the thread's current branch. */
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   lineage: OrchestrationV2AppThreadLineage,
+  presentation: Schema.optional(OrchestrationV2ThreadPresentation),
+  filedUnderThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  legacyFork: Schema.optional(OrchestrationV2LegacyForkOrigin),
   forkedFrom: Schema.NullOr(OrchestrationV2AppThread.fields.forkedFrom),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
@@ -2566,6 +2588,8 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.metadata.update"),
     commandId: CommandId,
     threadId: ThreadId,
+    presentation: Schema.optional(Schema.Struct({ kind: Schema.Literal("standard") })),
+    filedUnderThreadId: Schema.optional(Schema.NullOr(ThreadId)),
     title: Schema.optional(TrimmedNonEmptyString),
     /** Kick off (true) or abandon (false) an async title regeneration. */
     regenerateTitle: Schema.optional(Schema.Boolean),
@@ -2786,6 +2810,8 @@ export const OrchestrationV2Command = Schema.Union([
     sourceThreadId: ThreadId,
     targetThreadId: ThreadId,
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+    presentation: Schema.optional(Schema.Literals(["standard", "side"])),
+    runtimeMode: Schema.optional(RuntimeMode),
     title: Schema.optional(TrimmedNonEmptyString),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),

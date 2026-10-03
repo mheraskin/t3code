@@ -195,9 +195,11 @@ const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId:
 const ThreadForkTool = Tool.make("t3_thread_fork", {
   ...commandTool,
   description:
-    "Fork this thread from a stable run or checkpoint using the existing fork command. The fork inherits the source configuration. Acceptance does not mean a provider turn has completed.",
+    "Fork this thread from a stable run or checkpoint. Set presentation to side for a side conversation owned by this thread; it needs a completed checkpoint and defaults to supervised permissions. The fork shares the source workspace. Acceptance does not mean a provider turn has completed.",
   parameters: Schema.Struct({
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+    presentation: Schema.optional(Schema.Literals(["standard", "side"])),
+    runtimeMode: Schema.optional(RuntimeMode),
     title: Schema.optional(TrimmedNonEmptyString),
   }),
   success: transferResult,

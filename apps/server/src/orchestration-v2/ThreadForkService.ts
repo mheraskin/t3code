@@ -8,6 +8,7 @@ import {
   OrchestrationV2ProviderThread,
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
+  RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -62,6 +63,8 @@ export interface ThreadForkServiceV2Shape {
     readonly transferId: ContextTransferId;
     readonly targetThreadId: ThreadId;
     readonly title?: string;
+    readonly presentation?: "standard" | "side";
+    readonly runtimeMode?: RuntimeMode;
     readonly createdBy: OrchestrationV2Actor;
     readonly creationSource: OrchestrationV2CreationSource;
     readonly createdAt: DateTime.Utc;
@@ -85,12 +88,33 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
             cause: forkableSourceRunStatusError(input.sourceRun),
           });
         }
+        if (
+          input.presentation === "side" &&
+          (input.sourceRun.status !== "completed" || input.sourceRun.checkpointId === null)
+        ) {
+          return yield* new ThreadForkPlanError({
+            sourceThreadId: input.sourceProjection.thread.id,
+            targetThreadId: input.targetThreadId,
+            cause: "Side conversations need a completed turn with a checkpoint.",
+          });
+        }
         const targetThread: OrchestrationV2AppThread = {
           ...input.sourceProjection.thread,
           createdBy: input.createdBy,
           creationSource: input.creationSource,
           id: input.targetThreadId,
           title: input.title ?? `${input.sourceProjection.thread.title} fork`,
+          presentation:
+            input.presentation === "side"
+              ? { kind: "side", ownerThreadId: input.sourceProjection.thread.id }
+              : { kind: "standard" },
+          runtimeMode:
+            input.runtimeMode ??
+            (input.presentation === "side"
+              ? "approval-required"
+              : input.sourceProjection.thread.runtimeMode),
+          filedUnderThreadId: null,
+          legacyFork: undefined,
           activeProviderThreadId: null,
           lineage: {
             parentThreadId: input.sourceProjection.thread.id,

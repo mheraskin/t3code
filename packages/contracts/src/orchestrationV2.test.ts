@@ -37,6 +37,7 @@ import {
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadStreamItem,
   OrchestrationV2ThreadShell,
+  OrchestrationV2ThreadPresentation,
   OrchestrationV2TurnItem,
   OrchestrationV2TurnItemJson,
 } from "./orchestrationV2.ts";
@@ -90,6 +91,28 @@ const decodeOrchestrationV2SubscribeThreadInput = Schema.decodeUnknownSync(
 );
 
 describe("orchestration V2 contracts", () => {
+  it("requires a side conversation owner and only allows promotion in metadata updates", () => {
+    const decodePresentation = Schema.decodeUnknownSync(OrchestrationV2ThreadPresentation);
+    expect(decodePresentation({ kind: "side", ownerThreadId: "owner" })).toEqual({
+      kind: "side",
+      ownerThreadId: "owner",
+    });
+    expect(() => decodePresentation({ kind: "side" })).toThrow();
+    const update = {
+      type: "thread.metadata.update",
+      commandId: "promote-side",
+      threadId: "side",
+      presentation: { kind: "standard" },
+      filedUnderThreadId: null,
+    };
+    expect(decodeOrchestrationV2Command(update)).toEqual(update);
+    expect(() =>
+      decodeOrchestrationV2Command({
+        ...update,
+        presentation: { kind: "side", ownerThreadId: "unrelated" },
+      }),
+    ).toThrow();
+  });
   it("carries command failure metadata through runtime and JSON schemas without output text", () => {
     const base = {
       id: "command-item",

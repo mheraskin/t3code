@@ -2261,6 +2261,29 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Thread ${command.threadId} is no longer empty.`,
         });
     }
+    if (command.type === "thread.metadata.update" && command.filedUnderThreadId != null) {
+      const visited = new Set<ThreadId>([thread.id]);
+      let parentId: ThreadId | null = command.filedUnderThreadId;
+      while (parentId !== null) {
+        if (visited.has(parentId)) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Filing a thread cannot create a cycle.",
+          });
+        }
+        visited.add(parentId);
+        const parent = yield* projectionStore.getThread(parentId).pipe(mapDispatchError(command));
+        if (parent.projectId !== thread.projectId || parent.deletedAt !== null) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Filing needs an existing thread in the same project.",
+          });
+        }
+        parentId = parent.filedUnderThreadId ?? null;
+      }
+    }
     if (command.type === "thread.archive" && thread.archivedAt !== null) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
@@ -2657,6 +2680,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.mark-unread":
           return { ...thread, lastVisitedAt: markUnreadVisitedAt };
         case "thread.metadata.update": {
+          const filingOnly =
+            command.filedUnderThreadId !== undefined &&
+            command.presentation === undefined &&
+            command.title === undefined &&
+            command.regenerateTitle === undefined &&
+            command.branch === undefined &&
+            command.worktreePath === undefined &&
+            command.limitRecovery === undefined &&
+            command.linkedPullRequest === undefined;
           const previousRecovery =
             thread.limitRecovery?.runId === command.limitRecovery?.runId &&
             thread.limitRecovery?.resetAt === command.limitRecovery?.resetAt
@@ -2676,6 +2708,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   };
           return {
             ...thread,
+            ...(command.presentation === undefined ? {} : { presentation: command.presentation }),
+            ...(command.filedUnderThreadId === undefined
+              ? {}
+              : { filedUnderThreadId: command.filedUnderThreadId }),
             ...(command.title === undefined ? {} : { title: command.title }),
             ...(command.limitRecovery === undefined ? {} : { limitRecovery }),
             ...(command.limitRecovery !== undefined &&
@@ -2739,7 +2775,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : command.regenerateTitle === false || command.title !== undefined
                 ? { titleRegeneration: null }
                 : {}),
-            updatedAt: now,
+            updatedAt: filingOnly ? thread.updatedAt : now,
           };
         }
         case "thread.pull-request.link":
@@ -3240,6 +3276,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         canonicalSourcePoint: contextSourcePointForRun(sourceProjection, sourceRun),
         transferId,
         targetThreadId: command.targetThreadId,
+        ...(command.presentation === undefined ? {} : { presentation: command.presentation }),
+        ...(command.runtimeMode === undefined ? {} : { runtimeMode: command.runtimeMode }),
         ...(command.title === undefined ? {} : { title: command.title }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,

@@ -97,6 +97,9 @@ export interface EnvironmentThreadShell {
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
+  readonly presentation?: OrchestrationV2ThreadShell["presentation"];
+  readonly filedUnderThreadId?: OrchestrationV2ThreadShell["filedUnderThreadId"];
+  readonly legacyFork?: OrchestrationV2ThreadShell["legacyFork"];
   readonly forkedFrom: OrchestrationV2ThreadShell["forkedFrom"];
   readonly activeProviderThreadId: OrchestrationV2ThreadShell["activeProviderThreadId"];
   readonly latestRun: ThreadRunSummary | null;
@@ -236,6 +239,9 @@ export function presentThreadShell(
     linkedPullRequest: thread.linkedPullRequest ?? null,
     branchPullRequest: thread.branchPullRequest ?? null,
     lineage: thread.lineage,
+    presentation: thread.presentation,
+    filedUnderThreadId: thread.filedUnderThreadId,
+    legacyFork: thread.legacyFork,
     forkedFrom: thread.forkedFrom,
     activeProviderThreadId: thread.activeProviderThreadId,
     latestRun,

@@ -125,6 +125,8 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
           sourceThreadId: projection.thread.id,
           targetThreadId,
           sourcePoint: input.sourcePoint,
+          ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+          ...(input.runtimeMode === undefined ? {} : { runtimeMode: input.runtimeMode }),
           ...(input.title === undefined ? {} : { title: input.title }),
           createdBy: "agent",
           creationSource: "mcp",

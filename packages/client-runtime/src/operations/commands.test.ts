@@ -233,6 +233,61 @@ describe("V2 environment commands", () => {
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 
+  it.effect("creates and promotes side conversations through the existing V2 commands", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [] });
+      const provide = Effect.provideService(
+        EnvironmentSupervisor.EnvironmentSupervisor,
+        supervisor,
+      );
+      const childId = ThreadId.make("thread-side");
+      yield* forkThreadFromRun({
+        commandId: CommandId.make("side-fork"),
+        sourceThreadId: v2ThreadId,
+        targetThreadId: childId,
+        runId: RunId.make("run-stable"),
+        presentation: "side",
+        runtimeMode: "approval-required",
+      }).pipe(provide);
+      yield* updateThreadMetadata({
+        commandId: CommandId.make("side-promote"),
+        threadId: childId,
+        presentation: { kind: "standard" },
+      }).pipe(provide);
+      yield* updateThreadMetadata({
+        commandId: CommandId.make("side-file"),
+        threadId: childId,
+        filedUnderThreadId: v2ThreadId,
+      }).pipe(provide);
+      expect(commands).toEqual([
+        {
+          type: "thread.fork",
+          commandId: "side-fork",
+          createdBy: "user",
+          creationSource: "web",
+          sourceThreadId: v2ThreadId,
+          targetThreadId: childId,
+          sourcePoint: { type: "run", runId: "run-stable" },
+          presentation: "side",
+          runtimeMode: "approval-required",
+        },
+        {
+          type: "thread.metadata.update",
+          commandId: "side-promote",
+          threadId: childId,
+          presentation: { kind: "standard" },
+        },
+        {
+          type: "thread.metadata.update",
+          commandId: "side-file",
+          threadId: childId,
+          filedUnderThreadId: v2ThreadId,
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
   it.effect("resolves run ordinal zero to the persisted thread-start checkpoint", () =>
     Effect.gen(function* () {
       const scopeId = CheckpointScopeId.make("checkpoint-scope-root");

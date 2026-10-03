@@ -1,7 +1,9 @@
 import { assert, it } from "@effect/vitest";
 import {
+  CheckpointId,
   ContextTransferId,
   MessageId,
+  NodeId,
   type ModelSelection,
   type OrchestrationV2AppThread,
   type OrchestrationV2Run,
@@ -16,6 +18,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import * as ThreadForkService from "./ThreadForkService.ts";
+import { makeSubagentChildThread } from "./SubagentProjection.ts";
 
 const sourceThreadId = ThreadId.make("thread:fork-snoozed-source");
 const targetThreadId = ThreadId.make("thread:fork-awake-target");
@@ -106,11 +109,21 @@ function makeSourceProjection(sourceRun: OrchestrationV2Run): OrchestrationV2Thr
   };
 }
 
-const planFork = (sourceRun: OrchestrationV2Run) =>
+const planFork = (
+  sourceRun: OrchestrationV2Run,
+  options: {
+    readonly presentation?: "standard" | "side";
+    readonly runtimeMode?: OrchestrationV2AppThread["runtimeMode"];
+    readonly sourceThread?: OrchestrationV2AppThread;
+  } = {},
+) =>
   Effect.gen(function* () {
     const service = yield* ThreadForkService.ThreadForkServiceV2;
     return yield* service.plan({
-      sourceProjection: makeSourceProjection(sourceRun),
+      sourceProjection: {
+        ...makeSourceProjection(sourceRun),
+        thread: options.sourceThread ?? makeSourceThread(),
+      },
       sourceRun,
       sourceProviderThread: undefined,
       canonicalSourcePoint: {
@@ -123,6 +136,8 @@ const planFork = (sourceRun: OrchestrationV2Run) =>
       createdBy: "user",
       creationSource: "mobile",
       createdAt: forkCreatedAt,
+      ...(options.presentation === undefined ? {} : { presentation: options.presentation }),
+      ...(options.runtimeMode === undefined ? {} : { runtimeMode: options.runtimeMode }),
     });
   }).pipe(Effect.provide(ThreadForkService.layer));
 
@@ -176,6 +191,88 @@ it.effect("forks from a usage-limited failed run", () =>
       threadId: sourceThreadId,
       runId: sourceRunId,
     });
+  }),
+);
+
+it.effect("creates a supervised side conversation with the source as its owner", () =>
+  Effect.gen(function* () {
+    const sourceRun = {
+      ...makeSourceRun("completed"),
+      checkpointId: CheckpointId.make("checkpoint:side-source"),
+    };
+    const result = yield* planFork(sourceRun, { presentation: "side" });
+    assert.deepEqual(result.targetThread.presentation, {
+      kind: "side",
+      ownerThreadId: sourceThreadId,
+    });
+    assert.equal(result.targetThread.runtimeMode, "approval-required");
+    assert.isNull(result.targetThread.filedUnderThreadId);
+    assert.equal(result.transfer.sourcePoint.runId, sourceRun.id);
+    assert.equal(result.transfer.status, "pending");
+    const selected = yield* planFork(sourceRun, {
+      presentation: "side",
+      runtimeMode: "full-access",
+    });
+    assert.equal(selected.targetThread.runtimeMode, "full-access");
+  }),
+);
+
+it.effect(
+  "ordinary forks clear side presentation and manual filing inherited from the source",
+  () =>
+    Effect.gen(function* () {
+      const sourceThread: OrchestrationV2AppThread = {
+        ...makeSourceThread(),
+        presentation: { kind: "side", ownerThreadId: ThreadId.make("thread:owner") },
+        filedUnderThreadId: ThreadId.make("thread:filed-under"),
+        legacyFork: {
+          sourceThreadId: ThreadId.make("thread:legacy-source"),
+          sourceTurnId: null,
+          sourceMessageId: null,
+          forkedAt: "2026-07-24T09:00:00.000Z",
+        },
+      };
+      const result = yield* planFork(makeSourceRun("completed"), { sourceThread });
+      assert.deepEqual(result.targetThread.presentation, { kind: "standard" });
+      assert.isNull(result.targetThread.filedUnderThreadId);
+      assert.isUndefined(result.targetThread.legacyFork);
+      assert.equal(result.targetThread.runtimeMode, sourceThread.runtimeMode);
+    }),
+);
+
+it("keeps delegated children visible as ordinary threads when their parent is a side conversation", () => {
+  const parentThread: OrchestrationV2AppThread = {
+    ...makeSourceThread(),
+    presentation: { kind: "side", ownerThreadId: ThreadId.make("thread:owner") },
+    filedUnderThreadId: ThreadId.make("thread:filed-under"),
+  };
+  const child = makeSubagentChildThread({
+    parentThread,
+    childThreadId: targetThreadId,
+    parentNodeId: NodeId.make("node:delegation"),
+    activeProviderThreadId: null,
+    providerInstanceId,
+    modelSelection,
+    title: "Delegated child",
+    now: forkCreatedAt,
+    createdBy: "agent",
+    creationSource: "mcp",
+  });
+  assert.deepEqual(child.presentation, { kind: "standard" });
+  assert.isNull(child.filedUnderThreadId);
+  assert.equal(child.lineage.relationshipToParent, "subagent");
+  assert.equal(child.lineage.parentThreadId, sourceThreadId);
+});
+
+it.effect("rejects a side conversation before a completed checkpoint exists", () =>
+  Effect.gen(function* () {
+    for (const status of ["completed", "waiting", "failed", "interrupted"] as const) {
+      const error = yield* planFork(makeSourceRun(status), { presentation: "side" }).pipe(
+        Effect.flip,
+      );
+      assert.equal(error._tag, "ThreadForkPlanError");
+      assert.equal(error.cause, "Side conversations need a completed turn with a checkpoint.");
+    }
   }),
 );
 
