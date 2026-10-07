@@ -170,8 +170,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
 
               {density !== "essential" && props.showOpenInPicker ? (
                 <OpenInPicker
-                  environmentId={props.environmentId}
                   keybindings={props.keybindings}
+                  environmentId={props.environmentId}
                   availableEditors={props.availableEditors}
                   openInCwd={props.gitCwd}
                   displayMode="panel"
@@ -180,10 +180,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
 
               {props.activeProjectScripts ? (
                 <ProjectScriptsControl
+                  environmentId={props.environmentId}
                   displayMode="panel"
                   scripts={props.activeProjectScripts}
                   fileScripts={fileScripts}
-                  keybindings={props.keybindings}
                   preferredScriptId={props.preferredScriptId}
                   onRunScript={props.onRunProjectScript}
                   onAddScript={props.onAddProjectScript}
@@ -199,6 +199,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               headingId="thread-details-version-control-heading"
               title="Version Control"
               collapsible
+              separated={density === "full"}
             >
               <div className="flex flex-col">
                 {props.isGitRepo ? (

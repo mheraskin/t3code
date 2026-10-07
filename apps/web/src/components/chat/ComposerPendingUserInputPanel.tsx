@@ -13,6 +13,7 @@ import { ComposerBanner } from "./ComposerBanner";
 interface PendingUserInputPanelProps {
   ownsEvent: (event: Event) => boolean;
   pendingUserInputs: PendingUserInput[];
+  disabled?: boolean;
   respondingRequestIds: RuntimeRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
@@ -24,6 +25,7 @@ interface PendingUserInputPanelProps {
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
   ownsEvent,
   pendingUserInputs,
+  disabled = false,
   respondingRequestIds,
   answers,
   questionIndex,
@@ -40,6 +42,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       ownsEvent={ownsEvent}
       key={activePrompt.requestId}
       prompt={activePrompt}
+      disabled={disabled}
       isResponding={respondingRequestIds.includes(activePrompt.requestId)}
       answers={answers}
       questionIndex={questionIndex}
@@ -53,6 +56,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
 const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
   ownsEvent,
   prompt,
+  disabled,
   isResponding,
   answers,
   questionIndex,
@@ -62,6 +66,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 }: {
   ownsEvent: (event: Event) => boolean;
   prompt: PendingUserInput;
+  disabled: boolean;
   isResponding: boolean;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
@@ -71,7 +76,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 }) {
   // Message-mode requests remain answerable after their provider turn ends.
   const canRespond = prompt.responseCapability !== "not_resumable";
-  const responseDisabled = isResponding || !canRespond;
+  const responseDisabled = disabled || isResponding || !canRespond;
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
   const autoAdvanceTimerRef = useRef<number | null>(null);
@@ -92,6 +97,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   useEffect(() => {
     onAdvanceRef.current = onAdvance;
   }, [onAdvance]);
+
+  useEffect(() => {
+    if (disabled && autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  }, [disabled]);
 
   useEffect(() => {
     if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect) {
@@ -125,6 +137,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   const handleOptionSelection = useCallback(
     (questionId: string, optionValue: string) => {
+      if (disabled || isResponding) return;
       if (activeQuestion?.multiSelect) {
         onToggleOption(questionId, optionValue);
         return;
@@ -139,7 +152,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         onAdvanceRef.current();
       }, 200);
     },
-    [activeQuestion, onToggleOption],
+    [activeQuestion, disabled, isResponding, onToggleOption],
   );
 
   // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
@@ -258,8 +271,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   isSelected
                     ? "bg-muted/55 text-foreground"
                     : "bg-transparent text-foreground/85 hover:bg-muted/30",
-                  isResponding && "opacity-50 cursor-not-allowed",
-                  !isResponding && "cursor-pointer",
+                  (disabled || isResponding) && "opacity-50 cursor-not-allowed",
+                  !disabled && !isResponding && "cursor-pointer",
                 );
                 const content = (
                   <>
@@ -286,7 +299,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   <button
                     key={`${activeQuestion.id}:${optionValue}`}
                     type="button"
-                    disabled={isResponding}
+                    disabled={disabled || isResponding}
                     onClick={() => {
                       handleOptionSelection(activeQuestion.id, optionValue);
                     }}

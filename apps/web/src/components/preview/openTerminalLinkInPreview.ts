@@ -10,8 +10,9 @@ import {
 import { isWebUrl, resolveBrowserLinkTargetPreference } from "~/browser/browserLinkTarget";
 import type { OpenPreviewMutation } from "~/browser/openFileInPreview";
 import { resolvePreviewGatewayUrl, type OpenPreviewGateway } from "~/browser/previewGateway";
+import { isPreviewAvailableFor, previewRuntimeFor } from "~/browser/previewRuntime";
 import { recordVisitForThread } from "~/browserHistoryStore";
-import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from "~/previewStateStore";
+import { applyPreviewServerSnapshot } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 
 const terminalLinkErrorContext = {
@@ -50,7 +51,7 @@ export async function openTerminalLinkInPreview<E, GE>(
   const supportsPreview =
     !input.forceBrowser &&
     isWebUrl(input.url) &&
-    isPreviewSupportedInRuntime() &&
+    isPreviewAvailableFor(input.threadRef.environmentId) &&
     input.threadRef.threadId.length > 0 &&
     (await resolveBrowserLinkTargetPreference()) === "app";
 
@@ -66,10 +67,15 @@ export async function openTerminalLinkInPreview<E, GE>(
   };
 
   const defaults = await resolveBrowserDefaults();
-  // Terminal output names the environment's own loopback ports.
+  const runtime = previewRuntimeFor(input.threadRef.environmentId);
   const url =
-    (await resolvePreviewGatewayUrl(input.threadRef.environmentId, input.url, input.openGateway)) ??
-    input.url;
+    runtime === "server"
+      ? input.url
+      : ((await resolvePreviewGatewayUrl(
+          input.threadRef.environmentId,
+          input.url,
+          input.openGateway,
+        )) ?? input.url);
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
     input: {
@@ -79,6 +85,7 @@ export async function openTerminalLinkInPreview<E, GE>(
       // mapping, so the configured defaults are applied explicitly.
       viewport: browserDefaultOpenViewport(defaults),
       profileId: browserDefaultOpenProfileId(defaults),
+      ...(runtime === undefined ? {} : { runtime }),
     },
   });
   if (result._tag === "Failure") {

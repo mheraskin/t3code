@@ -3,8 +3,8 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 
@@ -36,7 +36,7 @@ describe("fork migration reconciliation", () => {
         const history = yield* sql`
           SELECT migration_id, name, created_at FROM effect_sql_migrations WHERE migration_id >= 55
         `;
-        assert.deepStrictEqual(yield* runMigrations(), [
+        assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 56 }), [
           [55, "OrchestrationV2"],
           [56, "RemoveRedundantProjectionIndexes"],
         ]);
@@ -53,7 +53,7 @@ describe("fork migration reconciliation", () => {
             (thread_id, source_updated_at, shell_imported_at, imported_message_count)
           VALUES ('preserved', '2026-09-01', '2026-09-01', 7)
         `;
-        assert.deepStrictEqual(yield* runMigrations(), []);
+        assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 56 }), []);
         assert.deepStrictEqual(
           yield* sql`SELECT thread_id, imported_message_count FROM orchestration_v2_legacy_imports`,
           [{ thread_id: "preserved", imported_message_count: 7 }],
@@ -63,7 +63,7 @@ describe("fork migration reconciliation", () => {
         `;
         assert.deepStrictEqual(
           ledger.map((row) => [row.migration_id, row.name] as const),
-          migrationManifest,
+          migrationManifest.filter(([id]) => id <= 56),
         );
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -72,7 +72,7 @@ describe("fork migration reconciliation", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* seedFork(48);
-      const applied = yield* runMigrations();
+      const applied = yield* runMigrations({ toMigrationInclusive: 56 });
       assert.deepStrictEqual(
         applied.map(([id]) => id),
         [48, 49, 50, 51, 52, 53, 54, 55, 56],
@@ -82,7 +82,7 @@ describe("fork migration reconciliation", () => {
       assert.deepStrictEqual(yield* sql`SELECT migration_id, name FROM t3_fork_migration_history`, [
         { migration_id: 48, name: "ProjectionThreadForks" },
       ]);
-      assert.deepStrictEqual(yield* runMigrations(), []);
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 56 }), []);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
@@ -96,7 +96,7 @@ describe("fork migration reconciliation", () => {
         WHEN NEW.name = 'OrchestrationV2'
         BEGIN SELECT RAISE(ABORT, 'injected failure'); END
       `;
-      assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
+      assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations({ toMigrationInclusive: 56 }))));
       assert.deepStrictEqual(
         yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
         history,
@@ -106,7 +106,7 @@ describe("fork migration reconciliation", () => {
         [],
       );
       yield* sql`DROP TRIGGER fail_fork_upgrade`;
-      assert.deepStrictEqual(yield* runMigrations(), [
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 56 }), [
         [55, "OrchestrationV2"],
         [56, "RemoveRedundantProjectionIndexes"],
       ]);
@@ -123,7 +123,7 @@ describe("fork migration reconciliation", () => {
         VALUES ('invalid-json', 'Project', '/tmp/project', '{broken', '2026-09-01', '2026-09-01')
       `;
       const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-      const error = yield* Effect.flip(runMigrations());
+      const error = yield* Effect.flip(runMigrations({ toMigrationInclusive: 56 }));
       assert.instanceOf(error, Migrator.MigrationError);
       assert.deepInclude(error, {
         kind: "Failed",
@@ -141,7 +141,7 @@ describe("fork migration reconciliation", () => {
         [],
       );
       yield* sql`UPDATE projection_projects SET scripts_json = '[]' WHERE project_id = 'invalid-json'`;
-      assert.deepStrictEqual(yield* runMigrations(), [
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 56 }), [
         [55, "OrchestrationV2"],
         [56, "RemoveRedundantProjectionIndexes"],
       ]);
@@ -164,7 +164,7 @@ describe("fork migration reconciliation", () => {
           yield* sql`CREATE TABLE orchestration_v2_unknown (id TEXT)`;
         }
         const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-        assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
+        assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations({ toMigrationInclusive: 56 }))));
         assert.deepStrictEqual(
           yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
           history,
@@ -179,8 +179,8 @@ describe("fork migration reconciliation", () => {
   it.effect("leaves a normal upstream database without a fork ledger", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations();
-      assert.deepStrictEqual(yield* runMigrations(), []);
+      yield* runMigrations({ toMigrationInclusive: 56 });
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 56 }), []);
       assert.deepStrictEqual(
         yield* sql`SELECT name FROM sqlite_master WHERE name = 't3_fork_migration_history'`,
         [],

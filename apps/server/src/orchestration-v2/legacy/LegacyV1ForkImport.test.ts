@@ -12,9 +12,9 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
 import * as ProjectionMaintenance from "../ProjectionMaintenance.ts";
@@ -22,9 +22,9 @@ import * as ProjectionStore from "../ProjectionStore.ts";
 import * as LegacyV1ThreadImporter from "./LegacyV1ThreadImporter.ts";
 
 const stores = Layer.mergeAll(
-  SqlitePersistenceMemory,
-  EventStore.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-  ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  SqlitePersistence.layerMemory,
+  EventStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
+  ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
 );
 const eventSink = EventSink.layer.pipe(Layer.provide(stores));
 const TestLayer = Layer.mergeAll(

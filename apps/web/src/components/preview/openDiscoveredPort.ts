@@ -10,6 +10,7 @@ import { resolvePreviewGatewayUrl, type OpenPreviewGateway } from "~/browser/pre
 import { recordVisitForThread } from "~/browserHistoryStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { openPreviewSession } from "./openPreviewSession";
+import { previewRuntimeFor } from "~/browser/previewRuntime";
 
 export async function openDiscoveredPort<E, GE>(input: {
   readonly threadRef: ScopedThreadRef;
@@ -19,8 +20,10 @@ export async function openDiscoveredPort<E, GE>(input: {
 }): Promise<AtomCommandResult<void, E | BrowserSettingsReadError>> {
   const environmentId = input.threadRef.environmentId;
   const resolvedUrl =
-    (await resolvePreviewGatewayUrl(environmentId, input.port.url, input.openGateway)) ??
-    resolveDiscoveredServerUrl(environmentId, input.port.url);
+    previewRuntimeFor(environmentId) === "server"
+      ? input.port.url
+      : ((await resolvePreviewGatewayUrl(environmentId, input.port.url, input.openGateway)) ??
+        resolveDiscoveredServerUrl(environmentId, input.port.url));
   const result = await openPreviewSession({
     openPreview: input.openPreview,
     threadRef: input.threadRef,

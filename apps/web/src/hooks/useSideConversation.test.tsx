@@ -15,7 +15,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import { useSideConversation } from "./useSideConversation";
 

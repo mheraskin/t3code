@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import BranchPullRequest from "./Migrations/048_ProjectionThreadBranchPullRequest.ts";
 import OrchestrationV2 from "./Migrations/055_OrchestrationV2.ts";
@@ -132,15 +132,14 @@ export const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(func
         `;
         if (replacement[0] === 55) {
           yield* replacement[3].pipe(
-            Effect.catchTag(
-              "SchemaError",
-              (cause) =>
+            Effect.catchTags({
+              SchemaError: (cause) =>
                 new Migrator.MigrationError({
                   kind: "Failed",
                   message: `Migration "${replacement[0]}_${replacement[2]}" failed`,
                   cause,
                 }),
-            ),
+            }),
           );
         } else {
           yield* replacement[3];
