@@ -89,6 +89,11 @@ or **Settled** to drag a parked thread back into either live section. Each drop 
 **Move up** and **Move down** are also available in the thread menu. The server
 saves the order, so it survives a refresh and appears on your other connected devices.
 
+On web and desktop, active threads are grouped by branch or worktree under a header you can click
+to collapse. A collapsed group still shows the open thread and any thread that finished since you
+last viewed it. Drag a group's header to move all of its threads at once: drop on another header to
+place the group above it, or on a group's threads to place it below. Groups stay with their project.
+
 On web and desktop, the list also animates section changes made with thread actions such as
 **Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion
 preference. While dragging, rows follow the insertion gap without replaying a second transition

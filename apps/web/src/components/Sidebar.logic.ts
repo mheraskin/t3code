@@ -421,6 +421,49 @@ export function planSidebarThreadDrop(input: {
   }
 }
 
+/** Moves a worktree group's threads, keeping their relative order, to just
+    before `beforeKey` in the active order, or to its end when null. Null when
+    a moved row cannot be written; no assignments when nothing would move. */
+export function planSidebarGroupMove(input: {
+  readonly activeOrder: readonly string[];
+  readonly activeKeysById: ReadonlyMap<string, string | null | undefined>;
+  readonly movedKeys: ReadonlySet<string>;
+  readonly beforeKey: string | null;
+  readonly activeReorderableKeys?: ReadonlySet<string>;
+}): {
+  readonly order: readonly string[];
+  readonly assignments: ReadonlyArray<{ readonly id: string; readonly orderKey: string }>;
+} | null {
+  const { activeOrder, activeKeysById, movedKeys, beforeKey, activeReorderableKeys } = input;
+  const writable = (key: string) => activeReorderableKeys?.has(key) ?? true;
+  const moved = activeOrder.filter((key) => movedKeys.has(key));
+  if (moved.length === 0 || !moved.every(writable)) return null;
+  const others = activeOrder.filter((key) => !movedKeys.has(key));
+  const insertAt = beforeKey === null ? others.length : others.indexOf(beforeKey);
+  if (insertAt === -1) return null;
+  const order = [...others.slice(0, insertAt), ...moved, ...others.slice(insertAt)];
+  if (order.every((key, index) => key === activeOrder[index])) return { order, assignments: [] };
+  // Place one row at a time so each lands between the row placed before it
+  // and the destination's lower neighbor, instead of its own old position.
+  // As with single-row drops, keyless rows the server cannot store sort
+  // outside the keyed run, so they neither bound nor receive writes.
+  const keysById = new Map(activeKeysById);
+  const assignments = new Map<string, string>();
+  const placedIds = new Set<string>();
+  for (const movedId of moved) {
+    placedIds.add(movedId);
+    const placed = order.filter((key) =>
+      movedKeys.has(key) ? placedIds.has(key) : writable(key) || keysById.get(key) != null,
+    );
+    for (const { id, orderKey } of planPinnedReorder({ orderedIds: placed, keysById, movedId })) {
+      keysById.set(id, orderKey);
+      assignments.set(id, orderKey);
+    }
+  }
+  if (![...assignments.keys()].every(writable)) return null;
+  return { order, assignments: [...assignments].map(([id, orderKey]) => ({ id, orderKey })) };
+}
+
 /** Project a drop's lifecycle fields before sorting its destination. Reusing
     the server's re-entry rules keeps the preview in place when events arrive. */
 export function applySidebarThreadDrop<

@@ -48,6 +48,7 @@ import {
   sortLogicalProjectsForSidebar,
   sortInboxThreadsByReturn,
   resolveSidebarDropTarget,
+  planSidebarGroupMove,
   planSidebarThreadDrop,
   sortPinnedThreadsForSidebar,
   sortProjectsForSidebar,
@@ -2299,6 +2300,61 @@ describe("Working shelf (beta)", () => {
         activeReorderableKeys: new Set(["a2"]),
       });
       expect(above.kind === "move-active" && above.assignments[0]!.orderKey < "m").toBe(true);
+    });
+
+    it("moves a worktree group's threads together, keeping their order", () => {
+      const activeKeysById = new Map([
+        ["a1", "f"],
+        ["b1", "m"],
+        ["c1", "n"],
+        ["b2", "p"],
+        ["c2", "t"],
+      ]);
+      const activeOrder = ["a1", "b1", "c1", "b2", "c2"];
+      const sortedAfter = (plan: ReturnType<typeof planSidebarGroupMove>) => {
+        const keys = new Map(activeKeysById);
+        for (const { id, orderKey } of plan?.assignments ?? []) keys.set(id, orderKey);
+        return activeOrder.toSorted((left, right) =>
+          keys.get(left)!.localeCompare(keys.get(right)!),
+        );
+      };
+      const movedKeys = new Set(["b1", "b2"]);
+
+      const toTop = planSidebarGroupMove({
+        activeOrder,
+        activeKeysById,
+        movedKeys,
+        beforeKey: "a1",
+      });
+      expect(toTop?.order).toEqual(["b1", "b2", "a1", "c1", "c2"]);
+      expect(sortedAfter(toTop)).toEqual(toTop?.order);
+      expect(toTop?.assignments.map(({ id }) => id)).toEqual(["b1", "b2"]);
+
+      const toEnd = planSidebarGroupMove({
+        activeOrder,
+        activeKeysById,
+        movedKeys,
+        beforeKey: null,
+      });
+      expect(sortedAfter(toEnd)).toEqual(["a1", "c1", "c2", "b1", "b2"]);
+
+      expect(
+        planSidebarGroupMove({
+          activeOrder: ["a1", "b1", "b2", "c1"],
+          activeKeysById,
+          movedKeys,
+          beforeKey: "c1",
+        })?.assignments,
+      ).toEqual([]);
+      expect(
+        planSidebarGroupMove({
+          activeOrder,
+          activeKeysById,
+          movedKeys,
+          beforeKey: "a1",
+          activeReorderableKeys: new Set(["a1", "b1", "c1", "c2"]),
+        }),
+      ).toBeNull();
     });
 
     it("only changes lifecycle when the inbox is time-ordered", () => {

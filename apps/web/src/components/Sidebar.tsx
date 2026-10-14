@@ -8,6 +8,7 @@ import {
   visibleMainConversationThreads,
 } from "@t3tools/client-runtime/state/side-conversations";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
+import { createPortal } from "react-dom";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import {
@@ -214,6 +215,7 @@ import {
   isSidebarThreadWorking,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  planSidebarGroupMove,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
@@ -763,6 +765,9 @@ function SidebarSectionPlaceholder(props: {
 // Pointer travel before a press on a row starts a drag, or a press on its
 // action button starts a sweep. Shorter presses stay clicks.
 const SIDEBAR_DRAG_DISTANCE = 6;
+
+// Native drag payload for moving a worktree group by its header.
+const SIDEBAR_BRANCH_GROUP_MIME = "application/x-t3-sidebar-branch-group";
 
 type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 
@@ -3269,17 +3274,36 @@ export default function Sidebar() {
   );
   const activeBranchGroupKeyByThreadKeyRef = useRef(activeBranchGroupKeyByThreadKey);
   activeBranchGroupKeyByThreadKeyRef.current = activeBranchGroupKeyByThreadKey;
-  const displayedActiveThreads = useMemo(
+  const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
+  // A collapsed group still shows the open thread and any thread that
+  // finished since it was last viewed, until it is opened.
+  const visibleBranchGroupThreads = useMemo(
     () =>
-      activeBranchGroups.flatMap((group) =>
-        collapsedBranchGroups.has(group.key)
-          ? group.threads.filter(
-              (thread) =>
-                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
-            )
-          : group.threads,
+      new Map(
+        activeBranchGroups.map((group) => [
+          group.key,
+          collapsedBranchGroups.has(group.key)
+            ? group.threads.filter((thread) => {
+                const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+                return (
+                  threadKey === routeThreadKey ||
+                  hasUnseenCompletion({
+                    ...thread,
+                    lastVisitedAt: resolveThreadLastVisitedAt(
+                      thread.lastVisitedAt,
+                      threadLastVisitedAtById[threadKey],
+                    ),
+                  })
+                );
+              })
+            : group.threads,
+        ]),
       ),
-    [activeBranchGroups, collapsedBranchGroups, routeThreadKey],
+    [activeBranchGroups, collapsedBranchGroups, routeThreadKey, threadLastVisitedAtById],
+  );
+  const displayedActiveThreads = useMemo(
+    () => activeBranchGroups.flatMap((group) => visibleBranchGroupThreads.get(group.key) ?? []),
+    [activeBranchGroups, visibleBranchGroupThreads],
   );
   const orderedThreads = useMemo(
     () => [
@@ -4136,18 +4160,7 @@ export default function Sidebar() {
     items.push({ kind: "marker", marker: "active-placeholder" });
     for (const group of activeBranchGroups) {
       items.push({ kind: "marker", marker: `branch:${group.key}` });
-      items.push(
-        ...rowsOf(
-          collapsedBranchGroups.has(group.key)
-            ? group.threads.filter(
-                (thread) =>
-                  scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
-                  routeThreadKey,
-              )
-            : group.threads,
-          "active",
-        ),
-      );
+      items.push(...rowsOf(visibleBranchGroupThreads.get(group.key) ?? [], "active"));
     }
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
@@ -4165,8 +4178,7 @@ export default function Sidebar() {
   }, [
     activeThreads,
     activeBranchGroups,
-    collapsedBranchGroups,
-    routeThreadKey,
+    visibleBranchGroupThreads,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
@@ -4530,6 +4542,151 @@ export default function Sidebar() {
       unsnoozeThread,
       workingShelfEnabled,
       updateThreadMetadata,
+    ],
+  );
+  // Dragging a worktree group's header moves all of its threads, using the
+  // same active-order keys as dragging one row. A time-ordered inbox has no
+  // arrangement to change.
+  const [groupDrag, setGroupDrag] = useState<{
+    readonly groupKey: string;
+    /** Group the dragged one lands before; null for the end of Active. */
+    readonly beforeGroupKey: string | null | undefined;
+    readonly indicator: {
+      readonly top: number;
+      readonly left: number;
+      readonly width: number;
+    } | null;
+  } | null>(null);
+  const canDragBranchGroup = useCallback(
+    (group: { readonly threads: readonly EnvironmentThreadShell[] }) =>
+      !workingShelfEnabled &&
+      activeBranchGroups.length > 1 &&
+      group.threads.every((thread) =>
+        activeReorderableThreadKeys.has(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        ),
+      ),
+    [activeBranchGroups.length, activeReorderableThreadKeys, workingShelfEnabled],
+  );
+  /** Over a group's header the drop lands before that group; over its rows, after it. */
+  const resolveBranchGroupDrop = useCallback(
+    (target: EventTarget | null, draggedKey: string) => {
+      if (!(target instanceof Element)) return null;
+      const header = target.closest<HTMLElement>("[data-sidebar-branch-group]");
+      const row = header ? null : target.closest<HTMLElement>("li[data-thread-item]");
+      const overKey =
+        header?.dataset.sidebarBranchGroup ??
+        (row?.dataset.threadItem
+          ? activeBranchGroupKeyByThreadKey.get(row.dataset.threadItem)
+          : undefined);
+      const overIndex = activeBranchGroups.findIndex((group) => group.key === overKey);
+      if (overIndex === -1) return null;
+      const beforeIndex = header ? overIndex : overIndex + 1;
+      const beforeGroupKey = activeBranchGroups[beforeIndex]?.key ?? null;
+      const draggedIndex = activeBranchGroups.findIndex((group) => group.key === draggedKey);
+      const unchanged = beforeIndex === draggedIndex || beforeIndex === draggedIndex + 1;
+      const list = threadListRef.current;
+      if (!list) return null;
+      const listRect = list.getBoundingClientRect();
+      let top: number;
+      if (beforeGroupKey !== null) {
+        const next = list.querySelector(
+          `[data-sidebar-branch-group="${window.CSS.escape(beforeGroupKey)}"]`,
+        );
+        if (!next) return null;
+        top = next.getBoundingClientRect().top;
+      } else {
+        const last = activeBranchGroups.at(-1)!;
+        const lastKeys = new Set(
+          (visibleBranchGroupThreads.get(last.key) ?? []).map((thread) =>
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          ),
+        );
+        const elements = [
+          list.querySelector(`[data-sidebar-branch-group="${window.CSS.escape(last.key)}"]`),
+          ...Array.from(list.querySelectorAll<HTMLElement>("li[data-thread-item]")).filter(
+            (element) => lastKeys.has(element.dataset.threadItem ?? ""),
+          ),
+        ];
+        top = Math.max(...elements.map((element) => element?.getBoundingClientRect().bottom ?? 0));
+      }
+      return {
+        beforeGroupKey: unchanged ? undefined : beforeGroupKey,
+        indicator: unchanged ? null : { top: top - 1, left: listRect.left, width: listRect.width },
+      };
+    },
+    [activeBranchGroupKeyByThreadKey, activeBranchGroups, visibleBranchGroupThreads],
+  );
+  const moveBranchGroup = useCallback(
+    (groupKey: string, beforeGroupKey: string | null) => {
+      const group = activeBranchGroupByKey.get(groupKey);
+      if (!group) return;
+      const keyOf = (thread: EnvironmentThreadShell) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      const beforeGroupThreadKeys = new Set(
+        beforeGroupKey === null
+          ? []
+          : (activeBranchGroupByKey.get(beforeGroupKey)?.threads ?? []).map(keyOf),
+      );
+      // A group sits where its earliest thread in the active order sits.
+      const beforeKey =
+        beforeGroupKey === null
+          ? null
+          : (activeKeys.find((key) => beforeGroupThreadKeys.has(key)) ?? null);
+      if (beforeGroupKey !== null && beforeKey === null) return;
+      const plan = planSidebarGroupMove({
+        activeOrder: activeKeys,
+        activeKeysById,
+        movedKeys: new Set(group.threads.map(keyOf)),
+        beforeKey,
+        activeReorderableKeys: activeReorderableThreadKeys,
+      });
+      if (plan === null || plan.assignments.length === 0) return;
+      const writes = plan.assignments.flatMap(({ id, orderKey }) => {
+        const thread = threadByKey.get(id);
+        return thread ? [{ thread, orderKey }] : [];
+      });
+      if (!checkThreadOperations(writes.map(({ thread }) => thread))) return;
+      const drop = {
+        key: plan.assignments[0]!.id,
+        sourceSection: "active" as const,
+        section: "active" as const,
+        occurredAt: new Date().toISOString(),
+        clearsSnooze: false,
+        order: plan.order,
+        keysAtDrop: activeKeysById,
+        assignedKeys: new Map(plan.assignments.map(({ id, orderKey }) => [id, orderKey])),
+      };
+      setOptimisticDrop(drop);
+      void (async () => {
+        for (const { thread, orderKey } of writes) {
+          const result = await reorderActiveThread(
+            scopeThreadRef(thread.environmentId, thread.id),
+            orderKey,
+          );
+          if (result._tag === "Success") continue;
+          setOptimisticDrop((current) => (current === drop ? null : current));
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to move worktree group",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+          return;
+        }
+      })();
+    },
+    [
+      activeBranchGroupByKey,
+      activeKeys,
+      activeKeysById,
+      activeReorderableThreadKeys,
+      reorderActiveThread,
+      threadByKey,
     ],
   );
   // One snooze per thread at a time — same double-dispatch guard as settle.
@@ -5651,6 +5808,40 @@ export default function Sidebar() {
                       // controls that opt back in, like the Woke pill.
                       actionSweep !== null && "**:pointer-events-none",
                     )}
+                    onDragOver={(event) => {
+                      if (!groupDrag) return;
+                      const drop = resolveBranchGroupDrop(event.target, groupDrag.groupKey);
+                      if (drop?.beforeGroupKey !== undefined) {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                      }
+                      setGroupDrag((current) =>
+                        current &&
+                        current.beforeGroupKey === drop?.beforeGroupKey &&
+                        current.indicator?.top === drop?.indicator?.top
+                          ? current
+                          : current && {
+                              ...current,
+                              beforeGroupKey: drop?.beforeGroupKey,
+                              indicator: drop?.indicator ?? null,
+                            },
+                      );
+                    }}
+                    onDragLeave={(event) => {
+                      if (!groupDrag || event.currentTarget.contains(event.relatedTarget as Node))
+                        return;
+                      setGroupDrag(
+                        (current) =>
+                          current && { ...current, beforeGroupKey: undefined, indicator: null },
+                      );
+                    }}
+                    onDrop={(event) => {
+                      if (!groupDrag) return;
+                      event.preventDefault();
+                      if (groupDrag.beforeGroupKey !== undefined)
+                        moveBranchGroup(groupDrag.groupKey, groupDrag.beforeGroupKey);
+                      setGroupDrag(null);
+                    }}
                   >
                     {(() => {
                       const renderThreadRowInner = (
@@ -5831,10 +6022,28 @@ export default function Sidebar() {
                           const first = group?.threads[0];
                           if (group && first)
                             items.push(
-                              <li key={item.marker} className="list-none">
+                              <li
+                                key={item.marker}
+                                className="list-none"
+                                data-sidebar-branch-group={group.key}
+                              >
                                 <button
                                   type="button"
                                   aria-expanded={!collapsedBranchGroups.has(group.key)}
+                                  draggable={canDragBranchGroup(group)}
+                                  onDragStart={(event) => {
+                                    event.dataTransfer.effectAllowed = "move";
+                                    event.dataTransfer.setData(
+                                      SIDEBAR_BRANCH_GROUP_MIME,
+                                      group.key,
+                                    );
+                                    setGroupDrag({
+                                      groupKey: group.key,
+                                      beforeGroupKey: undefined,
+                                      indicator: null,
+                                    });
+                                  }}
+                                  onDragEnd={() => setGroupDrag(null)}
                                   onClick={() =>
                                     setCollapsedBranchGroups((current) => {
                                       const next = new Set(current);
@@ -5994,6 +6203,16 @@ export default function Sidebar() {
                   </ul>
                 </SortableContext>
               </DndContext>
+              {groupDrag?.indicator
+                ? createPortal(
+                    <div
+                      aria-hidden
+                      className="pointer-events-none fixed z-50 h-0.5 rounded-full bg-primary"
+                      style={groupDrag.indicator}
+                    />,
+                    document.body,
+                  )
+                : null}
             </TooltipProvider>
           ) : null}
           {!isSearchingThreads &&
