@@ -1,8 +1,10 @@
 import { ThreadConversationPanel } from "./ThreadConversationPanel";
+import { saveFileOnDevice } from "~/files/fileTransfer";
 import { useSideConversation } from "../hooks/useSideConversation";
 import { parseComposerSideConversationCommand } from "@t3tools/shared/composerTrigger";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
+import { citeAssistantSelection, hasAssistantSelectionCite } from "./chat/assistantSelectionCite";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
   resolveBackgroundDraftWorkspaceOptions,
@@ -3851,16 +3853,15 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       try {
-        const url = await resolveFileAttachmentUrl({
-          attachment,
-          environmentId,
-          httpBaseUrl: connection.httpBaseUrl,
-          createAssetUrl: createAttachmentAssetUrl,
-        });
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = attachment.name;
-        anchor.click();
+        await saveFileOnDevice(attachment.name, async () => ({
+          _tag: "url",
+          url: await resolveFileAttachmentUrl({
+            attachment,
+            environmentId,
+            httpBaseUrl: connection.httpBaseUrl,
+            createAssetUrl: createAttachmentAssetUrl,
+          }),
+        }));
       } catch (error) {
         toastManager.add({
           type: "error",
@@ -8179,6 +8180,7 @@ export default function ChatView(props: ChatViewProps) {
       previewOpen: previewPanelOpen,
       editableFocus: isEditableFocused(eventTarget),
       modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
+      assistantSelection: hasAssistantSelectionCite(),
       composerFocus: document.activeElement?.getAttribute("data-testid") === "composer-editor",
       draftThreadRoute: routeKind === "draft",
       turnRunning: phase === "running",
@@ -8412,6 +8414,13 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         onToggleDiff();
+        return;
+      }
+
+      if (command === "chat.citeSelection") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) citeAssistantSelection();
         return;
       }
 

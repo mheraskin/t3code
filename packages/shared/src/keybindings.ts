@@ -174,6 +174,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+n", command: "chat.newWithoutProject", when: "!terminalFocus" },
   { key: "mod+f", command: "chat.find", when: "!terminalFocus && !previewFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  // Later rules win, so a selected assistant reply takes the chord from the model picker.
+  { key: "mod+shift+m", command: "chat.citeSelection", when: "assistantSelection" },
   { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
   { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
   { key: "mod+shift+a", command: "composer.mode", when: "!terminalFocus" },

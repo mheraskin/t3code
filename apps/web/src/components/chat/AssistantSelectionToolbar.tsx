@@ -5,7 +5,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { QuoteIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   captureAssistantTextSelection,
@@ -17,6 +17,7 @@ import {
   type SelectionActionPoint,
 } from "~/lib/selectionActions";
 import { Button } from "../ui/button";
+import { offerAssistantSelectionCite } from "./assistantSelectionCite";
 
 export function AssistantSelectionToolbar({
   viewport,
@@ -123,18 +124,26 @@ export function AssistantSelectionToolbar({
     };
   }, [threadRef, viewport]);
 
-  if (!selection) return null;
-  const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
+  const tooLong =
+    selection !== null && selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   const dismiss = () => {
     actionsRef.current?.cancel();
     setSelection(null);
   };
   const cite = () => {
-    if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
+    if (!selection || tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
     window.getSelection()?.removeAllRanges();
     dismiss();
     return true;
   };
+  const citeFromShortcut = useEffectEvent(cite);
+  const hasSelection = selection !== null;
+  useEffect(() => {
+    if (!hasSelection) return;
+    return offerAssistantSelectionCite(() => citeFromShortcut());
+  }, [hasSelection]);
+
+  if (!selection) return null;
   return createPortal(
     <Button
       ref={toolbarRef}

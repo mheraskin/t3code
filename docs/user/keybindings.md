@@ -21,7 +21,9 @@ send shortcut. Click the send button to use the configured follow-up behavior.
 When an active turn has queued messages, `mod+Shift+Enter` sends the first as a
 steer. Change it under **Queue: Send First Queued Message as Steer** in Keybindings.
 
-Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
+Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host. While
+text in an assistant response is selected, `mod+shift+m` instead
+[cites it in the composer](./composer.md#quote-an-assistant-response).
 To step a new thread to the next machine instead of opening the menu, bind
 **Composer: Cycle Host** in Keybindings. It has no default shortcut.
 Use `mod+shift+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
@@ -105,7 +107,8 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
 `previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
-`turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
+`turnRunning`, `editableFocus`, `assistantSelection`, `isWeb`, and `isDesktop`.
+`assistantSelection` is true while text in an assistant response is selected.
 `editableFocus` is true while a text field, the composer, or another editor has
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
 desktop app. Unknown keys evaluate to `false`.
@@ -152,7 +155,8 @@ terminals so native undo keeps working there.
 through the pages you have visited, like a browser's back and forward buttons.
 
 `chat.new` may ask you to choose a project when there is more than one.
-`chat.newLocal` skips that chooser. Both use your
+`chat.newLocal` (`mod+shift+n`) skips that chooser and keeps the focused thread's
+project, branch, and working directory. Without a focused thread, it uses your
 [new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
 (`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 
