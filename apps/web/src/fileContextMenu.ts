@@ -7,6 +7,7 @@
  */
 import {
   EDITORS,
+  type AssetResource,
   type ContextMenuItem,
   type EditorId,
   type EnvironmentId,
@@ -25,8 +26,16 @@ import { useAtomCommand } from "./state/use-atom-command";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { toastManager } from "./components/ui/toast";
 import { useAtomValue } from "@effect/atom-react";
+import { useFilesystemReadAccess } from "./state/filesystem";
+import { assetEnvironment } from "./state/assets";
+import { readPreparedConnection } from "./state/session";
+import { useAtomQueryRunner } from "./state/use-atom-query-runner";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { resolveAssetUrl } from "./assets/assetUrls";
+import { saveFileOnDevice } from "./files/fileTransfer";
 
 export type FileContextMenuAction =
+  | "download"
   | "reveal-in-folder"
   | "open"
   /** Submenu parent; never the activated id. */
@@ -66,6 +75,7 @@ export function resolveFileContextMenuAbsolutePath(target: FileContextMenuTarget
 const EDITOR_LABEL_BY_ID = new Map(EDITORS.map((editor) => [editor.id, editor.label]));
 
 export interface FileContextMenuCapabilities {
+  readonly canDownload?: boolean;
   readonly revealLabel: string | undefined;
   readonly canOpenDefault: boolean;
   readonly editorIds: ReadonlyArray<EditorId>;
@@ -83,6 +93,9 @@ export function buildFileContextMenuItems(input: {
   // Without a resolvable absolute path nothing here can act on the file.
   if (!input.hasAbsolutePath) return [];
   const items: ContextMenuItem<FileContextMenuAction>[] = [];
+  if (input.capabilities.canDownload) {
+    items.push({ id: "download", label: "Download…", icon: "download" });
+  }
   if (input.capabilities.canOpenDefault) {
     items.push({ id: "open", label: "Open", icon: "pencil" });
   }
@@ -114,12 +127,18 @@ export function buildFileContextMenuItems(input: {
  */
 /** Builds and dispatches the file context menu for one environment's files. */
 export function useFileContextMenu(environmentId: EnvironmentId | null) {
+  const { canReadFiles } = useFilesystemReadAccess(environmentId);
+  const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
+    reportFailure: false,
+    refresh: true,
+  });
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, { reportFailure: false });
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
 
   return useMemo(() => {
     const availableEditors = serverConfig?.availableEditors ?? [];
     const capabilities: FileContextMenuCapabilities = {
+      canDownload: environmentId !== null && canReadFiles,
       // The reveal wording comes from the server because on WSL the reveal can
       // run through Windows File Explorer even though the host reports Linux.
       revealLabel:
@@ -140,6 +159,33 @@ export function useFileContextMenu(environmentId: EnvironmentId | null) {
     ): Promise<void> => {
       const absolutePath = resolveFileContextMenuAbsolutePath(target);
       if (absolutePath === null || environmentId === null) return;
+
+      if (action === "download") {
+        try {
+          await saveFileOnDevice(absolutePath.split(/[\\/]/).at(-1) ?? "file", async () => {
+            const connection = readPreparedConnection(environmentId);
+            if (!connection) throw new Error("Reconnect to the environment and try again.");
+            const resource: AssetResource = {
+              _tag: "draft-workspace-file",
+              cwd: target.workspaceRoot ?? absolutePath,
+              path: absolutePath,
+              disposition: "attachment",
+            };
+            const result = await createAssetUrl({ environmentId, input: { resource } });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+            const url = resolveAssetUrl(connection.httpBaseUrl, result.value.relativeUrl);
+            if (!url) throw new Error("The environment returned an invalid download URL.");
+            return { _tag: "url", url };
+          });
+        } catch (cause) {
+          toastManager.add({
+            type: "error",
+            title: "Could not save file",
+            description: cause instanceof Error ? cause.message : "Please try again.",
+          });
+        }
+        return;
+      }
 
       const reveal = action === "reveal-in-folder";
       const editor =
@@ -190,7 +236,7 @@ export function useFileContextMenu(environmentId: EnvironmentId | null) {
       activate,
       show,
     };
-  }, [environmentId, openInEditor, serverConfig]);
+  }, [environmentId, openInEditor, serverConfig, canReadFiles, createAssetUrl]);
 }
 
 /** Convenience callback for onContextMenu handlers. */

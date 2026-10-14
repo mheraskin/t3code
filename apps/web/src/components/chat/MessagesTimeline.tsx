@@ -178,6 +178,7 @@ import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
+import { useWorkspaceFileTransfer } from "~/files/useFileTransfer";
 import { useProject, useThreadShell } from "../../state/entities";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
@@ -2411,6 +2412,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       return (
         <span data-thread-find-ignore>
           <UserMessageContextReferenceChip
+            environmentId={ctx.activeThreadEnvironmentId}
             reference={reference}
             record={record}
             annotationImage={annotationImage}
@@ -4353,6 +4355,11 @@ function UserMessageMentionChip(props: {
   copyMarkdown: string;
 }) {
   const ctx = use(TimelineRowCtx);
+  const transfer = useWorkspaceFileTransfer(
+    ctx.activeThreadEnvironmentId,
+    ctx.workspaceRoot,
+    props.record.path,
+  );
   return (
     <Tooltip>
       <TooltipTrigger
@@ -4362,6 +4369,8 @@ function UserMessageMentionChip(props: {
             render={<button type="button" />}
             aria-label={`Preview ${props.record.path}`}
             data-markdown-copy={props.copyMarkdown}
+            {...transfer.dragProps}
+            onContextMenu={transfer.onContextMenu}
             onClick={() => {
               if (ctx.threadRef)
                 useRightPanelStore.getState().openFile(ctx.threadRef, props.record.path);
@@ -4561,6 +4570,7 @@ function UserMessageElementDetails({
 }
 
 interface UserMessageContextRenderContext {
+  environmentId: EnvironmentId;
   reference: ChatMarkdownContextReference;
   annotationImage: ChatImageAttachment | null;
   attachment: ChatImageAttachment | ChatFileAttachment | null;
@@ -4643,6 +4653,16 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
         return (
           <ImageChipButton
             name={record.name}
+            transferSource={{
+              kind: "asset",
+              environmentId: context.environmentId,
+              resource: {
+                _tag: "attachment",
+                attachmentId: attachment.id,
+                fileName: attachment.name,
+                mimeType: attachment.mimeType,
+              },
+            }}
             previewUrl={attachment.previewUrl}
             size={formatAttachmentSize(record.sizeBytes)}
             data-markdown-copy={context.copyMarkdown}
@@ -4673,6 +4693,20 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
         return (
           <FileChip
             name={record.name}
+            transferSource={
+              attachment.downloadable === false
+                ? null
+                : {
+                    kind: "asset",
+                    environmentId: context.environmentId,
+                    resource: {
+                      _tag: "attachment",
+                      attachmentId: attachment.id,
+                      fileName: attachment.name,
+                      mimeType: attachment.mimeType,
+                    },
+                  }
+            }
             size={size}
             isVideo={isVideo}
             theme={context.resolvedTheme}
@@ -4797,6 +4831,7 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
 
 /** One inline context chip in a sent message, dispatched by the shared presentation registry. */
 function UserMessageContextReferenceChip(props: {
+  environmentId: EnvironmentId;
   reference: ChatMarkdownContextReference;
   record: KnownComposerContextRecord | undefined;
   annotationImage: ChatImageAttachment | null;
@@ -4812,6 +4847,7 @@ function UserMessageContextReferenceChip(props: {
     label: props.reference.label,
   });
   return userMessageContextPresentationRegistry.render(props.reference.kind, props.record, {
+    environmentId: props.environmentId,
     reference: props.reference,
     annotationImage: props.annotationImage,
     attachment: props.attachment,

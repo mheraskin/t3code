@@ -180,6 +180,52 @@ describe("AssetAccess", () => {
     );
   });
 
+  it.effect(
+    "downloads original arbitrary file bytes with an exact, attachment-only capability",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-file-download-" });
+        const bytes = Uint8Array.from([0, 255, 128, 10, 13, 42]);
+        for (const name of ["source.ts", ".env", "archive.zip", "no-extension", "report.html"]) {
+          const filePath = path.join(root, name);
+          yield* fs.writeFile(filePath, bytes);
+          const result = yield* issueAssetUrl({
+            resource: {
+              _tag: "draft-workspace-file",
+              cwd: root,
+              path: name,
+              disposition: "attachment",
+            },
+          });
+          const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+          const separator = suffix.indexOf("/");
+          const token = suffix.slice(0, separator);
+          const resolved = yield* resolveAsset(token, suffix.slice(separator + 1));
+          expect(resolved).toMatchObject({
+            kind: "file",
+            download: true,
+            fileName: name,
+            mimeType: "application/octet-stream",
+          });
+          if (resolved?.kind !== "file") throw new Error("Expected downloadable file");
+          const response = yield* assetFileResponse(resolved);
+          const webResponse = HttpServerResponse.toWeb(response);
+          expect(webResponse.headers.get("content-disposition")).toContain("attachment;");
+          expect(webResponse.headers.get("content-type")).toBe("application/octet-stream");
+          expect(new Uint8Array(yield* Effect.promise(() => webResponse.arrayBuffer()))).toEqual(
+            bytes,
+          );
+          expect(yield* resolveAsset(token, "sibling.zip")).toBeNull();
+          expect(yield* resolveAsset(token, `../${name}`)).toBeNull();
+        }
+        const previewError = yield* issueAssetUrl({
+          resource: { _tag: "draft-workspace-file", cwd: root, path: "source.ts" },
+        }).pipe(Effect.flip);
+        expect(previewError._tag).toBe("AssetPreviewTypeValidationError");
+      }).pipe(Effect.provide(layerTest)),
+  );
   it.effect("loads private media immediately after login with the GitHub credential", () => {
     let lookups = 0;
     const authorizations: Array<string | undefined> = [];

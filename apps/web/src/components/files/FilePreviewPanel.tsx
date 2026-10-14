@@ -37,7 +37,12 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
-import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
+import { DownloadIcon, FolderTree, Globe2, WrapTextIcon } from "lucide-react";
+import {
+  useFileTransfer,
+  workspaceFileTransferSource,
+  type FileTransferSource,
+} from "~/files/useFileTransfer";
 import { Code2, Eye, Table2 } from "lucide";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1091,6 +1096,18 @@ export default function FilePreviewPanel({
   const isDirectory = file.isNotFile && !isHostFile;
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isDirectory ? null : relativePath;
+  const transferSource = useMemo((): FileTransferSource | null => {
+    if (!previewPath) return null;
+    if (
+      file.data &&
+      !file.data.truncated &&
+      getOptimisticProjectFileQueryData(environmentId, cwd, previewPath) !== null
+    ) {
+      return { kind: "blob", file: new Blob([file.data.contents]) };
+    }
+    return workspaceFileTransferSource(environmentId, cwd, previewPath);
+  }, [environmentId, cwd, previewPath, file.data]);
+  const transfer = useFileTransfer(previewPath?.split(/[\\/]/).at(-1) ?? "file", transferSource);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   const showExplorer = shouldShowFileExplorer({
     relativePath: previewPath,
@@ -1313,6 +1330,15 @@ export default function FilePreviewPanel({
           {canOpenInBrowser ? (
             <FileSurfaceAction label="Open file in preview browser" onPress={handleOpenInBrowser}>
               <Globe2 className="size-3.5" />
+            </FileSurfaceAction>
+          ) : null}
+          {previewPath !== null ? (
+            <FileSurfaceAction
+              label={transfer.saving ? "Saving file…" : "Save file as…"}
+              disabled={transfer.saving}
+              onPress={() => void transfer.save()}
+            >
+              <DownloadIcon className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
           {!isHostFile && previewPath !== null ? (

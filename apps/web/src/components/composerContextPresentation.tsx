@@ -201,6 +201,7 @@ function ImageContextChip(props: {
         render={
           <ImageChipButton
             name={props.record.name}
+            transferSource={{ kind: "blob", file: props.record.file }}
             previewUrl={props.record.previewUrl}
             size={formatAttachmentSize(props.record.sizeBytes)}
             suffix={uploadStatusSuffix(props.upload)}
@@ -228,6 +229,22 @@ function FileContextChip(props: {
   return (
     <FileChip
       name={props.record.name}
+      transferSource={
+        props.record.file
+          ? { kind: "blob", file: props.record.file }
+          : props.record.uploadedAttachmentId && props.record.uploadEnvironmentId
+            ? {
+                kind: "asset",
+                environmentId: props.record.uploadEnvironmentId,
+                resource: {
+                  _tag: "attachment",
+                  attachmentId: props.record.uploadedAttachmentId,
+                  fileName: props.record.name,
+                  mimeType: props.record.mimeType,
+                },
+              }
+            : null
+      }
       size={size}
       isVideo={isVideo}
       theme={resolvedTheme}

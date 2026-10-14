@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 
 import { receiveProviderAuthCallback, cancelProviderAuthCallback } from "./methods/providerAuth.ts";
 import * as DesktopIpc from "./DesktopIpc.ts";
+import { prepareFileDrag, saveFile, startFileDrag } from "./methods/files.ts";
 import { installNotificationBadge } from "./methods/notificationBadge.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import {
@@ -140,6 +141,9 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setWslOnly);
 
   yield* ipc.handle(pickFolder);
+  yield* ipc.handle(prepareFileDrag);
+  yield* ipc.handle(saveFile);
+  yield* ipc.handle(startFileDrag);
   yield* ipc.handle(pickProjectFavicon);
   yield* ipc.handle(pickThemeFiles);
   yield* ipc.handle(setTheme);

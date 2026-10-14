@@ -20,6 +20,18 @@ import type {
   DesktopAppActivationResponse,
 } from "./desktopAppActivation.ts";
 
+export const DesktopFileSource = Schema.Union([
+  Schema.TaggedStruct("url", { url: Schema.String }),
+  Schema.TaggedStruct("bytes", { bytes: Schema.Uint8Array }),
+]);
+export type DesktopFileSource = typeof DesktopFileSource.Type;
+
+export const DesktopFileTransferInput = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  source: DesktopFileSource,
+});
+export type DesktopFileTransferInput = typeof DesktopFileTransferInput.Type;
+
 export interface ContextMenuItem<T extends string = string> {
   id: T;
   label: string;
@@ -1200,6 +1212,10 @@ export interface DesktopBridge {
   setWslDistro: (distro: string | null) => Promise<DesktopWslState>;
   setWslOnly: (enabled: boolean) => Promise<DesktopWslState>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
+  /** Optional while an older desktop shell hosts a newer web client. */
+  saveFile?: (input: DesktopFileTransferInput) => Promise<boolean>;
+  prepareFileDrag?: (input: DesktopFileTransferInput) => Promise<string>;
+  startFileDrag?: (id: string) => Promise<void>;
   /** Optional while older desktop shells can host a newer web client. */
   pickProjectFavicon?: (initialPath?: string) => Promise<string | null>;
   /**

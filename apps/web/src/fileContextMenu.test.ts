@@ -55,6 +55,14 @@ describe("resolveFileContextMenuAbsolutePath", () => {
 });
 
 describe("buildFileContextMenuItems", () => {
+  it("offers downloads on a remote environment without installed editors or a file manager", () => {
+    expect(
+      buildFileContextMenuItems({
+        hasAbsolutePath: true,
+        capabilities: { ...EMPTY_CAPABILITIES, canDownload: true },
+      }),
+    ).toEqual([{ id: "download", label: "Download…", icon: "download" }]);
+  });
   it("offers open, reveal, and an open-with submenu when all are available", () => {
     const items = buildFileContextMenuItems({
       hasAbsolutePath: true,

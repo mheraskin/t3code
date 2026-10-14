@@ -124,6 +124,7 @@ import { MediaActions, type MediaActionSource } from "./media/MediaActions";
 import { resolveProtocolRelativeMediaUrl } from "./media/mediaContent";
 import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
 import { FileTagChipContent } from "./chat/FileTagChip";
+import { useWorkspaceFileTransfer } from "~/files/useFileTransfer";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import {
   revealInFileExplorerLabelForKind,
@@ -1196,6 +1197,7 @@ function UncachedShikiCodeBlock({
 
 interface MarkdownFileLinkProps {
   environmentId: EnvironmentId | null;
+  cwd: string | undefined;
   href: string;
   targetPath: string;
   iconPath: string;
@@ -1947,6 +1949,7 @@ function MarkdownExternalLinkContent({
 
 const MarkdownFileLink = memo(function MarkdownFileLink({
   environmentId,
+  cwd,
   href,
   targetPath,
   iconPath,
@@ -1965,6 +1968,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onReveal,
   revealLabel,
 }: MarkdownFileLinkProps) {
+  const transfer = useWorkspaceFileTransfer(environmentId, cwd, iconPath);
   const handleOpenInEditor = useCallback(() => {
     if (!onOpen) {
       return;
@@ -2138,6 +2142,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       try {
         const clicked = await api.contextMenu.show(
           [
+            ...(environmentId && cwd ? ([{ id: "download", label: "Download…" }] as const) : []),
             ...(onOpenMedia ? ([{ id: "preview-media", label: "Preview media" }] as const) : []),
             ...(onOpen ? ([{ id: "open", label: openInEditorMenuLabel }] as const) : []),
             ...(onOpenInBrowser
@@ -2150,6 +2155,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           position,
         );
 
+        if (clicked === "download") {
+          await transfer.save();
+          return;
+        }
         if (clicked === "preview-media") {
           onOpenMedia?.();
           return;
@@ -2193,6 +2202,9 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       openInEditorMenuLabel,
       revealLabel,
       targetPath,
+      environmentId,
+      cwd,
+      transfer.save,
     ],
   );
 
@@ -2252,6 +2264,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
                 handleOpenInFilePreview();
               }}
               onContextMenu={handleContextMenu}
+              {...transfer.dragProps}
             >
               <FileTagChipContent
                 path={iconPath}
@@ -2270,6 +2283,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               data-markdown-copy={copyMarkdown}
               onClick={handleContextMenu}
               onContextMenu={handleContextMenu}
+              {...transfer.dragProps}
             >
               <FileTagChipContent
                 path={iconPath}
@@ -2297,6 +2311,8 @@ function areMarkdownFileLinkPropsEqual(
   next: Readonly<MarkdownFileLinkProps>,
 ): boolean {
   return (
+    previous.environmentId === next.environmentId &&
+    previous.cwd === next.cwd &&
     previous.href === next.href &&
     previous.targetPath === next.targetPath &&
     previous.iconPath === next.iconPath &&
@@ -2672,6 +2688,7 @@ function useChatMarkdownState({
       return (
         <MarkdownFileLink
           environmentId={environmentId}
+          cwd={cwd}
           href={fileLinkMeta.targetPath}
           targetPath={fileLinkMeta.targetPath}
           iconPath={fileLinkMeta.filePath}
@@ -2728,6 +2745,8 @@ function useChatMarkdownState({
       revealInFileManagerLabel,
       revealMarkdownFileInFileManager,
       threadRef,
+      environmentId,
+      cwd,
     ],
   );
 

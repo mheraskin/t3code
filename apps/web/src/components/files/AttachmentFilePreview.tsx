@@ -11,7 +11,7 @@ import { useAssetUrlRefresh } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ScrollArea } from "~/components/ui/scroll-area";
-import { toastManager } from "~/components/ui/toast";
+import { useFileTransfer } from "~/files/useFileTransfer";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
@@ -95,8 +95,20 @@ export function AttachmentFilePreview(props: {
     () => (resource ? { ...resource, disposition: "attachment" as const } : null),
     [resource],
   );
-  const prepareDownload = useAssetUrlRefresh(props.asset?.environmentId ?? null, downloadResource);
-  const [saving, setSaving] = useState(false);
+  const transferSource = useMemo(
+    () =>
+      props.file
+        ? { kind: "blob" as const, file: props.file }
+        : props.asset && downloadResource
+          ? {
+              kind: "asset" as const,
+              environmentId: props.asset.environmentId,
+              resource: downloadResource,
+            }
+          : null,
+    [props.file, props.asset, downloadResource],
+  );
+  const { save, saving } = useFileTransfer(props.name, transferSource);
   const [localUrl, setLocalUrl] = useState<string | null>(null);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [rendered, setRendered] = useState(true);
@@ -188,41 +200,6 @@ export function AttachmentFilePreview(props: {
     content !== null &&
     !(delimiter && rendered) &&
     !(kind === "markdown" && rendered);
-
-  const save = () => {
-    setSaving(true);
-    void (async () => {
-      try {
-        let file = props.file;
-        if (!file) {
-          const target = await prepareDownload();
-          if (!target) throw new Error("Reconnect to the environment and try again.");
-          const response = await fetch(target);
-          if (!response.ok) throw new Error("The file could not be loaded. Try again.");
-          file = await response.blob();
-        }
-        // A Blob keeps cross-origin downloads inside the desktop client instead of
-        // navigating its custom app scheme to an external browser.
-        const downloadUrl = URL.createObjectURL(file);
-        try {
-          const anchor = document.createElement("a");
-          anchor.href = downloadUrl;
-          anchor.download = props.name;
-          anchor.click();
-        } finally {
-          setTimeout(() => URL.revokeObjectURL(downloadUrl), 30_000);
-        }
-      } catch (cause) {
-        toastManager.add({
-          type: "error",
-          title: "Could not save file",
-          description: cause instanceof Error ? cause.message : "Please try again.",
-        });
-      } finally {
-        setSaving(false);
-      }
-    })();
-  };
 
   const body = failure ? (
     <FileSurfaceFailure
@@ -337,7 +314,7 @@ export function AttachmentFilePreview(props: {
           <FileSurfaceAction
             label={saving ? "Preparing file…" : "Save file"}
             disabled={saving}
-            onPress={save}
+            onPress={() => void save()}
           >
             <DownloadIcon className="size-3.5" />
           </FileSurfaceAction>

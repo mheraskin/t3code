@@ -101,6 +101,7 @@ import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
 import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
 import { FileTagChipContent } from "./chat/FileTagChip";
+import { useWorkspaceFileTransfer } from "~/files/useFileTransfer";
 import { SkillChipIcon } from "./chat/SkillInlineText";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { getTimelinePageScrollKey } from "./chat/pageScrollController";
@@ -283,6 +284,7 @@ const ComposerMentionExtension = Node.create({
 function ComposerMentionNodeView({ node }: NodeViewProps) {
   const actions = use(ComposerContextActionsContext);
   const path = (node.attrs.path as string) ?? "";
+  const transfer = useWorkspaceFileTransfer(actions.environmentId, actions.cwd, path);
   const chip = (
     <ContextChip
       kind="mention"
@@ -292,6 +294,8 @@ function ComposerMentionNodeView({ node }: NodeViewProps) {
       contentEditable={false}
       spellCheck={false}
       data-composer-mention-chip="true"
+      {...transfer.dragProps}
+      onContextMenu={transfer.onContextMenu}
     >
       <FileTagChipContent
         path={path}

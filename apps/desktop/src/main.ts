@@ -33,6 +33,7 @@ import * as ElectronShell from "./electron/ElectronShell.ts";
 import * as ElectronTheme from "./electron/ElectronTheme.ts";
 import * as ElectronUpdater from "./electron/ElectronUpdater.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
+import * as DesktopFileTransfer from "./files/DesktopFileTransfer.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopAppActivation from "./app/DesktopAppActivation.ts";
 import * as DesktopWebLinks from "./app/DesktopWebLinks.ts";
@@ -238,6 +239,7 @@ const layerDesktopClerk = DesktopClerk.layer.pipe(
 );
 
 const layerDesktopApplicationRuntime = layerDesktopApplication.pipe(
+  Layer.provideMerge(DesktopFileTransfer.layer),
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(NodeHttpClient.layerUndici),
   Layer.provideMerge(NetService.layer),

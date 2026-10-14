@@ -22,12 +22,15 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("media-file", {
     threadId: ThreadId,
     path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+    /** Exact-file download, including file types that cannot be previewed. */
+    disposition: Schema.optionalKey(Schema.Literal("attachment")),
   }),
   // A workspace file named by a draft that has no thread yet. The draft names
   // its workspace root explicitly instead of resolving one from a thread.
   Schema.TaggedStruct("draft-workspace-file", {
     cwd: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
     path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+    disposition: Schema.optionalKey(Schema.Literal("attachment")),
   }),
   Schema.TaggedStruct("attachment", {
     attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),

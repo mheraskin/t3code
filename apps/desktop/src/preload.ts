@@ -201,6 +201,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   cancelProviderAuthCallback: (url: string) =>
     ipcRenderer.invoke(IpcChannels.CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL, url),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
+  saveFile: (input) => ipcRenderer.invoke(IpcChannels.SAVE_FILE_CHANNEL, input),
+  prepareFileDrag: (input) => ipcRenderer.invoke(IpcChannels.PREPARE_FILE_DRAG_CHANNEL, input),
+  startFileDrag: (id) => ipcRenderer.invoke(IpcChannels.START_FILE_DRAG_CHANNEL, id),
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),
   openSystemSettings: (pane: string) =>

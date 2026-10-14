@@ -18,6 +18,7 @@ import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "./ui/popove
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { usePullRequestPreviewTarget } from "~/lib/openPullRequestLink";
+import { useFileTransfer, type FileTransferSource } from "~/files/useFileTransfer";
 
 /** ContextChip kind for a pull request context in each display state. */
 export const PULL_REQUEST_CHIP_KINDS = {
@@ -173,6 +174,7 @@ export function ImageChipButton({
   size,
   suffix,
   style,
+  transferSource,
   ...props
 }: Omit<ComponentProps<typeof ContextChip>, "kind" | "render"> & {
   name: string;
@@ -180,7 +182,9 @@ export function ImageChipButton({
   /** Every attachment chip reports its size; images are no exception. */
   size: string;
   suffix?: string | null;
+  transferSource?: FileTransferSource | null;
 }) {
+  const transfer = useFileTransfer(name, transferSource ?? null);
   const [sample, setSample] = useState<{ url: string; color: string | undefined }>();
   const [corsFailedUrl, setCorsFailedUrl] = useState<string>();
   const accent = sample?.url === previewUrl ? sample?.color : undefined;
@@ -191,6 +195,7 @@ export function ImageChipButton({
       aria-label={`Image attachment, ${name}, ${size}`}
       style={{ ...style, ...(accent ? { "--context-chip-accent": accent } : {}) } as CSSProperties}
       {...props}
+      {...(transferSource ? { ...transfer.dragProps, onContextMenu: transfer.onContextMenu } : {})}
     >
       {previewUrl ? (
         <img
@@ -227,7 +232,9 @@ export function FileChip(props: {
   error?: boolean;
   unresolved?: boolean;
   onOpen?: (() => void) | undefined;
+  transferSource?: FileTransferSource | null;
 }) {
+  const transfer = useFileTransfer(props.name, props.transferSource ?? null);
   const content = <FileChipContent {...props} />;
   const state = props.unresolved
     ? ("unresolved" as const)
@@ -240,6 +247,9 @@ export function FileChip(props: {
     "aria-label": [props.accessibleLabel, props.suffix].filter(Boolean).join(", "),
     "data-markdown-copy": props.copyMarkdown,
     "data-context-unresolved": props.unresolved ? "true" : undefined,
+    ...(props.transferSource
+      ? { ...transfer.dragProps, onContextMenu: transfer.onContextMenu }
+      : {}),
   } as const;
   return (
     <Tooltip>
