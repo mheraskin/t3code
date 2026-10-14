@@ -15,6 +15,10 @@ type ComposerModelSelectionState = Pick<
 interface ThreadContextLike {
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  branch?: string | null;
+  worktreePath?: string | null;
+  envMode?: DraftThreadEnvMode;
+  startFromOrigin?: boolean;
 }
 
 interface NewThreadHandler {
@@ -25,6 +29,7 @@ interface NewThreadHandler {
       worktreePath?: string | null;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      environmentSelection?: "auto" | "manual";
     },
     // The opened draft's identity, which most callers have no use for.
   ): Promise<unknown>;
@@ -83,12 +88,7 @@ export function resolveThreadActionProjectRef(
   return context.defaultProjectRef;
 }
 
-// New threads inherit only the *project* from the current context. Branch,
-// worktree, and env mode always come from the user's configured defaults —
-// carrying them over from the viewed thread meant "new thread" silently
-// reused checkouts and branches. Explicit affordances (branch toolbar's
-// "new thread in this worktree") pass those options to handleNewThread
-// directly instead.
+/** Start another thread in the focused conversation's project and checkout. */
 export async function startNewThreadFromContext(
   context: ChatThreadActionContext,
 ): Promise<boolean> {
@@ -97,6 +97,18 @@ export async function startNewThreadFromContext(
     return false;
   }
 
-  await context.handleNewThread(projectRef);
+  const source = context.activeThread ?? context.activeDraftThread;
+  if (source) {
+    const worktreePath = source.worktreePath ?? null;
+    await context.handleNewThread(projectRef, {
+      branch: source.branch ?? null,
+      worktreePath,
+      envMode: source.envMode ?? (worktreePath ? "worktree" : "local"),
+      startFromOrigin: source.startFromOrigin ?? false,
+      environmentSelection: "manual",
+    });
+  } else {
+    await context.handleNewThread(projectRef);
+  }
   return true;
 }

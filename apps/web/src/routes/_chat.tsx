@@ -9,7 +9,9 @@ import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
-import { useProjects } from "../state/entities";
+import { readThreadShell, useProjects } from "../state/entities";
+import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { chatEventOwner } from "../components/chat/composerEventScope";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentScope } from "../state/session";
@@ -105,9 +107,12 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
+        const owner = chatEventOwner(event);
+        const focusedRef = owner ? parseScopedThreadKey(owner) : null;
+        const focusedThread = focusedRef ? readThreadShell(focusedRef) : null;
         void startNewThreadFromContext({
           activeDraftThread,
-          activeThread: activeThread ?? undefined,
+          activeThread: focusedThread ?? activeThread ?? undefined,
           defaultProjectRef,
           handleNewThread,
         });

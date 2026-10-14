@@ -7,8 +7,9 @@ need a separate branch and working directory.
 
 On web and desktop, a new thread keeps the current project and carries your model
 and mode selections, unless the destination project has its own model default.
-Its branch and workspace mode come from your configured defaults. To continue in
-an existing worktree, use **New thread in this worktree** from the branch toolbar.
+Press `Cmd+Shift+N` on macOS or `Ctrl+Shift+N` on Windows and Linux to start another
+thread in the focused thread's project, branch, and working directory. Starting
+a thread in a different project uses that project's configured workspace defaults.
 
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.

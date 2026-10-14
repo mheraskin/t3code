@@ -9,14 +9,19 @@ export function useComposerFloatingLayerProps() {
 }
 
 /** The nearest chat owns input, including its menus rendered outside the chat column. */
-export function chatOwnsEvent(event: Event, owner: string, fallbackOwner: boolean): boolean {
+export function chatEventOwner(event: Event): string | null {
   for (const target of event.composedPath()) {
     if (!(target instanceof Element)) continue;
     const scope = target.closest("[data-chat-owner]");
-    if (scope) return scope.getAttribute("data-chat-owner") === owner;
+    if (scope) return scope.getAttribute("data-chat-owner");
   }
   const scope = document.activeElement?.closest("[data-chat-owner]");
-  return scope ? scope.getAttribute("data-chat-owner") === owner : fallbackOwner;
+  return scope?.getAttribute("data-chat-owner") ?? null;
+}
+
+export function chatOwnsEvent(event: Event, owner: string, fallbackOwner: boolean): boolean {
+  const eventOwner = chatEventOwner(event);
+  return eventOwner === null ? fallbackOwner : eventOwner === owner;
 }
 
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
