@@ -58,6 +58,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  CalendarClockIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -160,6 +161,7 @@ import {
   isWindowsPlatform,
   newProjectId,
 } from "../lib/utils";
+import { useScheduledTaskEditorStore } from "../scheduledTaskEditorStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
@@ -1872,6 +1874,17 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:new-scheduled-task",
+    title: "New scheduled task",
+    searchTerms: ["scheduled", "task", "automation", "recurring", "schedule", "cron", "loop"],
+    icon: <CalendarClockIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      useScheduledTaskEditorStore.getState().openNew();
+    },
+  });
 
   if (activeThreadId && supportsThreadFind) {
     actionItems.push({

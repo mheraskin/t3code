@@ -62,6 +62,7 @@ import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { readEnvironmentScope } from "~/state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
+import type { ResolvedSettingsScope } from "./settingsScope";
 import {
   WEBHOOK_SIGNATURE_DEFAULTS,
   matchesScheduledTaskScope,
@@ -310,6 +311,8 @@ export function ScheduledTasksSettings(target: {
           key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
           initialEnvironmentId={editor.environmentId}
           task={editor.task}
+          scope={scope}
+          connectedEnvironments={connectedEnvironments}
           onClose={() => setEditor(null)}
         />
       ) : null}
@@ -401,21 +404,15 @@ function ScheduledTaskEnvironmentSection({
   );
 }
 
-function ScheduledTaskRow({
-  environmentId,
-  task,
-  onEdit,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly task: ScheduledTask;
-  readonly onEdit: () => void;
-}) {
+/**
+ * Pause/resume, run now and delete for one task, with the permission check and
+ * failure toast shared by the settings rows and the sidebar menu.
+ */
+export function useScheduledTaskActions(environmentId: EnvironmentId, task: ScheduledTask) {
   const canOperate = useAtomValue(
     serverEnvironment.upsertScheduledTask.permissionAtom(environmentId),
   );
   const [busy, setBusy] = useState(false);
-  const [deliveriesOpen, setDeliveriesOpen] = useState(false);
-  const isWebhook = task.schedule.type === "webhook";
   const toggle = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
     label: "scheduled task enabled",
   });
@@ -425,8 +422,8 @@ function ScheduledTaskRow({
   const remove = useAtomCommand(serverEnvironment.deleteScheduledTask, {
     label: "scheduled task delete",
   });
-  const act = async (action: "toggle" | "run" | "delete") => {
-    if (busy || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+  const act = async (action: "toggle" | "run" | "delete"): Promise<boolean> => {
+    if (busy || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return false;
     setBusy(true);
     const result =
       action === "toggle"
@@ -435,16 +432,35 @@ function ScheduledTaskRow({
           ? await run({ environmentId, input: { id: task.id } })
           : await remove({ environmentId, input: { id: task.id } });
     setBusy(false);
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not update scheduled task",
-          description: String(squashAtomCommandFailure(result)),
-        }),
-      );
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not update scheduled task",
+            description: String(squashAtomCommandFailure(result)),
+          }),
+        );
+      }
+      return false;
     }
+    return true;
   };
+  return { busy, canOperate, act };
+}
+
+function ScheduledTaskRow({
+  environmentId,
+  task,
+  onEdit,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly task: ScheduledTask;
+  readonly onEdit: () => void;
+}) {
+  const { busy, canOperate, act } = useScheduledTaskActions(environmentId, task);
+  const [deliveriesOpen, setDeliveriesOpen] = useState(false);
+  const isWebhook = task.schedule.type === "webhook";
   return (
     <SettingsRow
       title={task.title}
@@ -769,16 +785,24 @@ function WebhookDeliveryMode({ environmentId }: { readonly environmentId: Enviro
   );
 }
 
-function ScheduledTaskEditorDialog({
+/**
+ * Create or edit one scheduled task. Opened from the settings page, which
+ * narrows the project list to its scope, and from the main screen, which
+ * passes no scope and offers every project.
+ */
+export function ScheduledTaskEditorDialog({
   initialEnvironmentId,
   task,
+  scope,
+  connectedEnvironments,
   onClose,
 }: {
   readonly initialEnvironmentId: EnvironmentId;
   readonly task: ScheduledTask | null;
+  readonly scope: ResolvedSettingsScope | null;
+  readonly connectedEnvironments: readonly EnvironmentPresentation[];
   readonly onClose: () => void;
 }) {
-  const { scope, connectedEnvironments } = useSettingsScope();
   const [environmentId, setEnvironmentId] = useState(initialEnvironmentId);
   const environment = useEnvironment(environmentId);
   const connected =
@@ -792,7 +816,7 @@ function ScheduledTaskEditorDialog({
       allProjects.filter(
         (project) =>
           project.environmentId === environmentId &&
-          matchesScheduledTaskScope(scope, environmentId, project.id),
+          (scope === null || matchesScheduledTaskScope(scope, environmentId, project.id)),
       ),
     [allProjects, environmentId, scope],
   );
@@ -804,6 +828,9 @@ function ScheduledTaskEditorDialog({
   );
   const upsertTask = useAtomCommand(serverEnvironment.upsertScheduledTask, {
     label: "scheduled task upsert",
+  });
+  const removeTask = useAtomCommand(serverEnvironment.deleteScheduledTask, {
+    label: "scheduled task delete",
   });
   const [draft, setDraft] = useState<DraftState>(() =>
     task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
@@ -860,6 +887,36 @@ function ScheduledTaskEditorDialog({
         description: error instanceof Error ? error.message : String(error),
       }),
     );
+  };
+
+  const deleteTask = async () => {
+    if (
+      !draft.editingId ||
+      !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
+      submissionPending.current ||
+      saving
+    )
+      return;
+    const confirmed =
+      (await requestConfirmDialog(`Delete "${draft.title.trim() || "this task"}"?`, {
+        variant: "destructive",
+      })) ?? window.confirm(`Delete "${draft.title.trim() || "this task"}"?`);
+    if (!confirmed) return;
+    submissionPending.current = true;
+    setSaving(true);
+    const result = await removeTask({
+      environmentId,
+      input: { id: draft.editingId as ScheduledTaskId },
+    });
+    setSaving(false);
+    if (result._tag === "Failure") {
+      submissionPending.current = false;
+      if (!isAtomCommandInterrupted(result)) {
+        reportFailure("Could not delete scheduled task", squashAtomCommandFailure(result));
+      }
+      return;
+    }
+    onClose();
   };
 
   const submit = async () => {
@@ -1371,6 +1428,18 @@ function ScheduledTaskEditorDialog({
         </DialogPanel>
 
         <DialogFooter>
+          {draft.editingId ? (
+            <Button
+              variant="destructive-outline"
+              size="sm"
+              className="sm:mr-auto"
+              disabled={!canOperate || saving || editingTaskMissing || !connected}
+              onClick={() => void deleteTask()}
+            >
+              <Trash2Icon />
+              Delete
+            </Button>
+          ) : null}
           <DialogClose render={<Button variant="outline" size="sm" disabled={saving} />}>
             Cancel
           </DialogClose>
