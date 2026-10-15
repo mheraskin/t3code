@@ -33,8 +33,14 @@ import { observeResize } from "~/lib/observeResize";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
+  actions,
+  search,
 }: {
   isElectron: boolean;
+  /** Controls that share the titlebar row with the brand, at its end. */
+  actions?: ReactNode;
+  /** While set, takes the whole row in place of the brand and actions. */
+  search?: ReactNode;
 }) {
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
@@ -65,24 +71,43 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           aria-label="Toggle main sidebar"
         />
       </div>
-      {/* One visible line: the pill wraps onto the clipped second line once it no longer fits.
-          The padding keeps the brand's focus ring inside the clip. */}
-      <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
-        <SidebarBrand onBackdrop={backdropVariant !== null} />
-        {pillLabel ? (
-          <div className="ml-1 flex h-7 items-center">
-            <Badge data-environment-identification="pill" size="sm" variant="secondary">
-              {pillLabel}
-            </Badge>
+      {search ? (
+        <div className="relative z-10 flex min-w-0 flex-1 items-center md:ml-[var(--workspace-titlebar-content-left)]">
+          {search}
+        </div>
+      ) : (
+        <>
+          {/* One visible line: the pill wraps onto the clipped second line once it no longer fits.
+              The padding keeps the brand's focus ring inside the clip. */}
+          <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
+            <SidebarBrand onBackdrop={backdropVariant !== null} />
+            {pillLabel ? (
+              <div className="ml-1 flex h-7 items-center">
+                <Badge data-environment-identification="pill" size="sm" variant="secondary">
+                  {pillLabel}
+                </Badge>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+          {actions ? (
+            <div
+              className={cn(
+                "relative z-10 flex shrink-0 items-center",
+                backdropVariant && "sidebar-on-stage-backdrop",
+              )}
+            >
+              {actions}
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 });
 
-// Measures the brand at its titlebar inset, plus the header's right padding and the
-// sidebar border, so the sidebar minimum follows font size, zoom and macOS window controls.
+// Measures the brand at its titlebar inset, the header's four action buttons, plus the
+// header's right padding and the sidebar border, so the sidebar minimum follows font
+// size, zoom and macOS window controls.
 export function SidebarBrandWidthProbe({
   onWidthChange,
 }: {
@@ -103,8 +128,9 @@ export function SidebarBrandWidthProbe({
       className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
       ref={observeWidth}
     >
-      <div className="ml-[var(--workspace-titlebar-content-left)] flex">
+      <div className="ml-[var(--workspace-titlebar-content-left)] flex gap-2">
         <SidebarBrandMark onBackdrop={false} />
+        <div className="w-28 shrink-0" />
       </div>
     </div>
   );

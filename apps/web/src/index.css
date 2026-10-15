@@ -518,6 +518,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Header controls drawn over the stage art take the brand's white. */
+@utility sidebar-on-stage-backdrop {
+  --sidebar-icon-color: rgb(255 255 255 / 0.85);
+}
+
 @keyframes live-tool-shine {
   from {
     background-position:
