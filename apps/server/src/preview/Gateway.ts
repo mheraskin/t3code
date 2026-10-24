@@ -20,7 +20,7 @@
  */
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
-import * as NodeOs from "node:os";
+import * as NodeOS from "node:os";
 
 import {
   PREVIEW_GATEWAY_TOKEN_QUERY_PARAM,
@@ -182,7 +182,7 @@ export const rewriteLocation = (
 };
 
 export const tailscaleAddresses = (
-  interfaces: ReturnType<typeof NodeOs.networkInterfaces> = NodeOs.networkInterfaces(),
+  interfaces: ReturnType<typeof NodeOS.networkInterfaces> = NodeOS.networkInterfaces(),
 ): ReadonlyArray<string> =>
   Object.values(interfaces)
     .flatMap((entries) => entries ?? [])
@@ -319,7 +319,7 @@ export const make = Effect.gen(function* PreviewGatewayMake() {
   const listeners = new Map<number, ReadonlyArray<NodeHttp.Server>>();
   // Tailscale names machines after their hostname, which MagicDNS resolves as
   // `xps` and, on clients that allow it, `<tenant>.xps`.
-  const machineName = NodeOs.hostname().split(".")[0]!.toLowerCase();
+  const machineName = NodeOS.hostname().split(".")[0]!.toLowerCase();
 
   const closePort = (port: number) => {
     const servers = listeners.get(port);

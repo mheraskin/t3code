@@ -5,7 +5,7 @@ export function formatAppDisplayName(input: {
   readonly stageLabel: string;
 }): string {
   const stage = input.stageLabel.trim().toLowerCase();
-  if (stage === "latest" || stage === "alpha") {
+  if (stage === "latest" || stage === "beta") {
     return input.baseName;
   }
 

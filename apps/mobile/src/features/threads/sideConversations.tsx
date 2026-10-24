@@ -8,7 +8,14 @@ import {
   sideConversationsForThread,
 } from "@t3tools/client-runtime/state/side-conversations";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import { MessageId, ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import type { AtomCommand, AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import {
+  MessageId,
+  ThreadId,
+  type EnvironmentId,
+  type OrchestrationV2ThreadProjection,
+  type RunId,
+} from "@t3tools/contracts";
 import { useCallback, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { uuidv4 } from "../../lib/uuid";
@@ -20,6 +27,76 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { getComposerDraftSnapshot, setComposerDraftText } from "../../state/use-composer-drafts";
 import { waitForThreadShellReady } from "./threadForkNavigation";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
+
+type CommandRunner<C> =
+  C extends AtomCommand<infer W, infer A, infer E>
+    ? (value: W) => Promise<AtomCommandResult<A, E>>
+    : never;
+
+// The React Compiler cannot lower try/finally, so the steps live outside the hook.
+async function createSideConversation(input: {
+  readonly source: EnvironmentThreadShell;
+  readonly runId: RunId;
+  readonly draft: string;
+  readonly forkFromRun: CommandRunner<typeof threadEnvironment.forkFromRun>;
+  readonly startTurn: CommandRunner<typeof threadEnvironment.startTurn>;
+  readonly openThread: (environmentId: EnvironmentId, threadId: ThreadId) => void;
+}): Promise<boolean> {
+  const { source, draft, forkFromRun, startTurn } = input;
+  const targetThreadId = ThreadId.make(uuidv4());
+  const result = await forkFromRun({
+    environmentId: source.environmentId,
+    input: {
+      sourceThreadId: source.id,
+      targetThreadId,
+      runId: input.runId,
+      title: `${source.title} side conversation`,
+      presentation: "side",
+      runtimeMode: source.runtimeMode,
+      creationSource: "mobile",
+    },
+  });
+  if (result._tag !== "Success") return false;
+  const childKey = scopedThreadKey(source.environmentId, targetThreadId);
+  setComposerDraftText(childKey, draft);
+  if (draft.trim()) {
+    const sent = await startTurn({
+      environmentId: source.environmentId,
+      input: {
+        threadId: targetThreadId,
+        message: {
+          messageId: MessageId.make(uuidv4()),
+          role: "user",
+          text: draft.trim(),
+          attachments: [],
+        },
+        runtimeMode: source.runtimeMode,
+        interactionMode: source.interactionMode,
+        dispatchMode: "start",
+      },
+    });
+    if (sent._tag === "Success") {
+      if (getComposerDraftSnapshot(childKey).text === draft) setComposerDraftText(childKey, "");
+    } else {
+      Alert.alert(
+        "Question not sent",
+        "Your question is saved in the side conversation's draft. Open it to retry.",
+      );
+    }
+  }
+  const atom = environmentThreadShells.threadShellAtom(
+    scopeThreadRef(source.environmentId, targetThreadId),
+  );
+  const ready = await waitForThreadShellReady({
+    read: () => appAtomRegistry.get(atom) !== null,
+  });
+  if (!ready) {
+    Alert.alert("Side conversation created", "Reconnect and open it from its parent conversation.");
+    return true;
+  }
+  input.openThread(source.environmentId, targetThreadId);
+  return true;
+}
 
 export function useMobileSideConversationActions({
   thread,
@@ -48,73 +125,20 @@ export function useMobileSideConversationActions({
         return false;
       }
       const source = thread;
-      const targetThreadId = ThreadId.make(uuidv4());
       creating.current = true;
       setBusy(true);
-      try {
-        const result = await forkFromRun({
-          environmentId: source.environmentId,
-          input: {
-            sourceThreadId: source.id,
-            targetThreadId,
-            runId: run.id,
-            title: `${source.title} side conversation`,
-            presentation: "side",
-            runtimeMode: source.runtimeMode,
-            creationSource: "mobile",
-          },
-        });
-        if (result._tag !== "Success") return false;
-        const childKey = scopedThreadKey(source.environmentId, targetThreadId);
-        setComposerDraftText(childKey, draft);
-        if (draft.trim()) {
-          const sent = await startTurn({
-            environmentId: source.environmentId,
-            input: {
-              threadId: targetThreadId,
-              message: {
-                messageId: MessageId.make(uuidv4()),
-                role: "user",
-                text: draft.trim(),
-                attachments: [],
-              },
-              runtimeMode: source.runtimeMode,
-              interactionMode: source.interactionMode,
-              dispatchMode: "start",
-            },
-          });
-          if (sent._tag === "Success") {
-            if (getComposerDraftSnapshot(childKey).text === draft)
-              setComposerDraftText(childKey, "");
-          } else {
-            Alert.alert(
-              "Question not sent",
-              "Your question is saved in the side conversation's draft. Open it to retry.",
-            );
-          }
-        }
-        const atom = environmentThreadShells.threadShellAtom(
-          scopeThreadRef(source.environmentId, targetThreadId),
-        );
-        const ready = await waitForThreadShellReady({
-          read: () => appAtomRegistry.get(atom) !== null,
-        });
-        if (!ready) {
-          Alert.alert(
-            "Side conversation created",
-            "Reconnect and open it from its parent conversation.",
-          );
-          return true;
-        }
-        navigation.navigate("Thread", {
-          environmentId: source.environmentId,
-          threadId: targetThreadId,
-        });
-        return true;
-      } finally {
+      return createSideConversation({
+        source,
+        runId: run.id,
+        draft,
+        forkFromRun,
+        startTurn,
+        openThread: (environmentId, threadId) =>
+          navigation.navigate("Thread", { environmentId, threadId }),
+      }).finally(() => {
         creating.current = false;
         setBusy(false);
-      }
+      });
     },
     [enabled, forkFromRun, startTurn, projection, thread, navigation],
   );

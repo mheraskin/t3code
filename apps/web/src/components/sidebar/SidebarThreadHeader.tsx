@@ -35,12 +35,10 @@ export interface SidebarThreadHeaderActionsProps {
   projectScope: ReactNode;
   onOpenSearch: () => void;
   onNewProject: () => void;
-  /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
   newThreadShortcutLabel: string | null | undefined;
   newThreadInProjectShortcutLabel: string | null | undefined;
-  /** Shift+click only matters once there is more than one project to pick. */
   showNewThreadInProjectHint: boolean;
 }
 
@@ -167,11 +165,6 @@ export function SidebarThreadSearchBar({
   );
 }
 
-/**
- * Icon button with a tooltip, sized for the header's segmented pair. Spreads
- * unknown props through so it can serve as a popup trigger's render target,
- * which injects its own handlers, ref and aria state.
- */
 export function SidebarHeaderIconButton({
   label,
   tooltip = label,
@@ -179,7 +172,6 @@ export function SidebarHeaderIconButton({
   children,
   ...rest
 }: {
-  /** Accessible name; also the tooltip unless `tooltip` says more. */
   label: string;
   tooltip?: ReactNode;
   className?: string | undefined;
@@ -202,7 +194,6 @@ export function SidebarHeaderIconButton({
         }
       >
         {children}
-        {/* Coarse-pointer hit area, matching the rest of the sidebar chrome. */}
         <span
           aria-hidden
           className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"

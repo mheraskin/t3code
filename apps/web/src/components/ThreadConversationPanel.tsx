@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,
@@ -20,6 +20,21 @@ import { useRightPanelStore } from "../rightPanelStore";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { Button } from "./ui/button";
 
+/** Runs one panel action and resolves to its failure message, or null on success. */
+async function runConversationAction<A, E>(
+  action: () => Promise<AtomCommandResult<A, E>>,
+  success?: () => void,
+): Promise<string | null> {
+  try {
+    const result = await action();
+    if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+    success?.();
+    return null;
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : "The action failed.";
+  }
+}
+
 export function ThreadConversationPanel({
   ownerRef,
   threadId,
@@ -29,10 +44,7 @@ export function ThreadConversationPanel({
   threadId: ThreadId;
   children: ReactNode;
 }) {
-  const ref = useMemo(
-    () => scopeThreadRef(ownerRef.environmentId, threadId),
-    [ownerRef.environmentId, threadId],
-  );
+  const ref = scopeThreadRef(ownerRef.environmentId, threadId);
   const state = useEnvironmentThread(ref.environmentId, threadId);
   const shell = useThreadShell(ref);
   const isSideConversation = shell?.source.presentation?.kind === "side";
@@ -57,16 +69,10 @@ export function ThreadConversationPanel({
     inFlight.current = true;
     setBusy(true);
     setError(null);
-    try {
-      const result = await action();
-      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      success?.();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The action failed.");
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
+    const failure = await runConversationAction(action, success);
+    inFlight.current = false;
+    setBusy(false);
+    if (failure !== null) setError(failure);
   };
   if (state.status === "deleted" || shell?.deletedAt)
     return (

@@ -96,7 +96,7 @@ export const make = Effect.gen(function* () {
     // without rewriting preview sessions (which breaks Turnstile, #7110).
     // Stable builds carry no stage, matching the display name.
     const { baseName, stageLabel } = environment.branding;
-    yield* electronApp.setName(stageLabel === "Alpha" ? baseName : `${baseName} ${stageLabel}`);
+    yield* electronApp.setName(stageLabel === "Beta" ? baseName : `${baseName} ${stageLabel}`);
     yield* electronApp.setAboutPanelOptions({
       applicationName: environment.displayName,
       applicationVersion: environment.appVersion,

@@ -22,7 +22,7 @@ import {
   PlusIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState, type ReactNode } from "react";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
@@ -37,11 +37,10 @@ import { useConnectedEnvironmentIds } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
-  relativeLabel,
+  ScheduledRelativeLabel,
   scheduleLabel,
   useScheduledTaskActions,
 } from "../settings/ScheduledTasksSettings";
-import { useRelativeTimeTick } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -64,16 +63,13 @@ interface EnvironmentScheduledTask {
 
 function useScheduledTasks(): readonly EnvironmentScheduledTask[] {
   const environmentIds = useConnectedEnvironmentIds();
-  const tasksAtom = useMemo(
-    () =>
-      Atom.make((get) =>
-        environmentIds.flatMap((environmentId) => {
-          const result = get(serverEnvironment.scheduledTasksLive({ environmentId, input: {} }));
-          const tasks = Option.getOrNull(AsyncResult.value(result))?.tasks ?? [];
-          return tasks.map((task) => ({ environmentId, task }));
-        }),
-      ),
-    [environmentIds],
+  // The React Compiler keeps this atom while the connected environments are unchanged.
+  const tasksAtom = Atom.make((get) =>
+    environmentIds.flatMap((environmentId) => {
+      const result = get(serverEnvironment.scheduledTasksLive({ environmentId, input: {} }));
+      const tasks = Option.getOrNull(AsyncResult.value(result))?.tasks ?? [];
+      return tasks.map((task) => ({ environmentId, task }));
+    }),
   );
   return useAtomValue(tasksAtom);
 }
@@ -129,10 +125,7 @@ export function SidebarScheduledTasks() {
   );
 }
 
-// Split out so the minute tick that keeps "next in 5m" honest only runs while
-// the list is open.
 function ScheduledTaskList({ tasks }: { tasks: readonly EnvironmentScheduledTask[] }) {
-  useRelativeTimeTick(60_000);
   return (
     <ul className="flex flex-col gap-px">
       {tasks.map(({ environmentId, task }) => (
@@ -262,11 +255,15 @@ function ScheduledTaskRow({
   );
 }
 
-function taskStatusLabel(task: ScheduledTask): string {
+function taskStatusLabel(task: ScheduledTask): ReactNode {
   const schedule = scheduleLabel(task.schedule);
   if (!task.enabled) return `${schedule} · paused`;
   if (task.lastRunStatus === "running") return `${schedule} · running`;
   if (task.lastRunStatus === "failed") return `${schedule} · last run failed`;
   if (task.schedule.type === "webhook" || task.nextRunAt === null) return schedule;
-  return `${schedule} · next ${relativeLabel(task.nextRunAt)}`;
+  return (
+    <>
+      {schedule} · next <ScheduledRelativeLabel value={task.nextRunAt} />
+    </>
+  );
 }

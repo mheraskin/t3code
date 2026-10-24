@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 
 import { useScheduledTaskEditorStore } from "../../scheduledTaskEditorStore";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
@@ -14,13 +14,9 @@ export function ScheduledTaskEditorHost() {
   const close = useScheduledTaskEditorStore((state) => state.close);
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const connectedEnvironments = useMemo(
-    () =>
-      environments.filter(
-        (environment) =>
-          environment.connection.phase === "connected" && environment.serverConfig !== null,
-      ),
-    [environments],
+  const connectedEnvironments = environments.filter(
+    (environment) =>
+      environment.connection.phase === "connected" && environment.serverConfig !== null,
   );
   const environmentId =
     target?.environmentId ??

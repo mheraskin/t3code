@@ -3,7 +3,6 @@ import { ChevronRightIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 
-/** Sections share header and content insets in both the sidebar and popover. */
 export function ThreadDetailsSection({
   headingId,
   title,
@@ -41,7 +40,7 @@ export function ThreadDetailsSection({
               aria-expanded={open}
               aria-controls={contentId}
               onClick={() => setExpanded((current) => !current)}
-              className="flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             >
               <ChevronRightIcon
                 aria-hidden

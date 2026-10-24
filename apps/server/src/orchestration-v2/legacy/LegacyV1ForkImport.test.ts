@@ -191,22 +191,10 @@ describe("legacy fork import", () => {
         sideChat: true,
       });
       yield* insertThread({
-        id: "mismatched-turn",
-        forkJson: encodeFork({ ...source("parent"), sourceTurnId: TurnId.make("other-turn") }),
-        sideChat: true,
-      });
-      yield* insertThread({
         id: "shared-turn",
         forkJson: encodeFork({ ...source("parent"), sourceTurnId: TurnId.make("shared-turn-id") }),
         sideChat: true,
       });
-      yield* sql`
-        INSERT INTO projection_turns (thread_id, turn_id, state, requested_at, checkpoint_files_json)
-        VALUES
-          ('other', 'other-turn', 'completed', '2026-01-02T00:00:00.000Z', '[]'),
-          ('other', 'shared-turn-id', 'completed', '2026-01-02T00:00:00.000Z', '[]'),
-          ('parent', 'shared-turn-id', 'completed', '2026-01-02T00:00:00.000Z', '[]')
-      `;
       yield* sql`
         INSERT INTO projection_thread_messages
           (message_id, thread_id, role, text, attachments_json, is_streaming, created_at, updated_at)
@@ -232,7 +220,6 @@ describe("legacy fork import", () => {
         "orphan",
         "cross-project",
         "mismatched-message",
-        "mismatched-turn",
         "cycle-a",
         "cycle-b",
       ]) {

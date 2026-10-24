@@ -31,7 +31,6 @@ interface NewThreadHandler {
       startFromOrigin?: boolean;
       environmentSelection?: "auto" | "manual";
     },
-    // The opened draft's identity, which most callers have no use for.
   ): Promise<unknown>;
 }
 

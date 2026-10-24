@@ -15,8 +15,7 @@ type SlashSearchItem = Extract<
 /**
  * A provider expands a slash command only when it opens the whole message;
  * anywhere else it reaches the agent as literal text, so it is not offered
- * there. /side also routes the whole message from its prefix. Other built-ins
- * apply locally on selection, and skills insert a `$` mention from any position.
+ * there. /side also routes the whole message from its prefix.
  */
 export function slashCommandItemsForPromptPosition(
   items: ReadonlyArray<SlashSearchItem>,

@@ -19,6 +19,9 @@ import {
 } from "./Gateway.ts";
 
 const secret = new Uint8Array(32).fill(7);
+// Fixed epochs on either side of now, so token expiry never depends on the runner's clock.
+const VALID_UNTIL = Date.UTC(2100, 0, 1);
+const EXPIRED_AT = Date.UTC(2000, 0, 1);
 const servers: NodeHttp.Server[] = [];
 
 const listen = async (server: NodeHttp.Server): Promise<number> => {
@@ -70,7 +73,7 @@ const startGateway = async (upstreamPort: number, onUpstreamGone = () => {}) => 
 };
 
 const cookieFor = (port: number) =>
-  `${gatewayCookieName(port)}=${signGatewayToken({ port, expiresAt: Date.now() + 60_000 }, secret)}`;
+  `${gatewayCookieName(port)}=${signGatewayToken({ port, expiresAt: VALID_UNTIL }, secret)}`;
 
 describe("preview gateway", () => {
   it("rejects requests without a gateway cookie", async () => {
@@ -86,7 +89,7 @@ describe("preview gateway", () => {
   it("trades a URL token for a cookie and redirects without it", async () => {
     const upstreamPort = await startUpstream({});
     const origin = await startGateway(upstreamPort);
-    const token = signGatewayToken({ port: upstreamPort, expiresAt: Date.now() + 60_000 }, secret);
+    const token = signGatewayToken({ port: upstreamPort, expiresAt: VALID_UNTIL }, secret);
 
     const response = await fetch(
       `${origin}/pos?tenant=a&${PREVIEW_GATEWAY_TOKEN_QUERY_PARAM}=${token}`,
@@ -102,7 +105,7 @@ describe("preview gateway", () => {
   it("strips a stale URL token when the cookie still grants access", async () => {
     const upstreamPort = await startUpstream({});
     const origin = await startGateway(upstreamPort);
-    const expired = signGatewayToken({ port: upstreamPort, expiresAt: Date.now() - 1 }, secret);
+    const expired = signGatewayToken({ port: upstreamPort, expiresAt: EXPIRED_AT }, secret);
 
     const response = await fetch(`${origin}/a?${PREVIEW_GATEWAY_TOKEN_QUERY_PARAM}=${expired}`, {
       headers: { cookie: cookieFor(upstreamPort) },
@@ -117,11 +120,8 @@ describe("preview gateway", () => {
   it("rejects tokens minted for another port or already expired", async () => {
     const upstreamPort = await startUpstream({});
     const origin = await startGateway(upstreamPort);
-    const otherPort = signGatewayToken(
-      { port: upstreamPort + 1, expiresAt: Date.now() + 60_000 },
-      secret,
-    );
-    const expired = signGatewayToken({ port: upstreamPort, expiresAt: Date.now() - 1 }, secret);
+    const otherPort = signGatewayToken({ port: upstreamPort + 1, expiresAt: VALID_UNTIL }, secret);
+    const expired = signGatewayToken({ port: upstreamPort, expiresAt: EXPIRED_AT }, secret);
 
     for (const token of [otherPort, expired]) {
       const response = await fetch(`${origin}/?${PREVIEW_GATEWAY_TOKEN_QUERY_PARAM}=${token}`, {

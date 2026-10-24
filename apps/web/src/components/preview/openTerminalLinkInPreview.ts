@@ -37,14 +37,9 @@ interface OpenTerminalLinkInPreviewInput<E, GE> {
   readonly openPreview: OpenPreviewMutation<E>;
   readonly openGateway: OpenPreviewGateway<GE>;
   readonly fallbackToBrowser: () => void;
-  /** Cmd/Ctrl-click bypasses the preference and opens in the system browser. */
   readonly forceBrowser: boolean;
 }
 
-/**
- * Opens a terminal hyperlink where the "Open links in" setting says, unless a
- * Cmd/Ctrl-click explicitly requests the system browser.
- */
 export async function openTerminalLinkInPreview<E, GE>(
   input: OpenTerminalLinkInPreviewInput<E, GE>,
 ): Promise<void> {
@@ -81,8 +76,6 @@ export async function openTerminalLinkInPreview<E, GE>(
     input: {
       threadId: input.threadRef.threadId,
       url,
-      // Same reason as `openUrlInPreview`: this path handles its own result
-      // mapping, so the configured defaults are applied explicitly.
       viewport: browserDefaultOpenViewport(defaults),
       profileId: browserDefaultOpenProfileId(defaults),
       ...(runtime === undefined ? {} : { runtime }),
