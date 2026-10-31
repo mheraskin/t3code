@@ -1,14 +1,6 @@
 /**
- * The sidebar's scheduled tasks shelf: every task on every connected
- * environment, above the thread list. Collapsed by default and absent when
- * there are no tasks, so it costs nothing to users who never schedule work.
- *
- * A row opens the task's dialog over the current screen, where it can be
- * changed or deleted. Its menu (also on right-click) adds the quick actions:
- * open the thread its runs post into, run now, pause or resume, delete. While
- * collapsed, the header still counts the tasks and flags any whose last run
- * failed. New tasks start from the header's plus button or the command
- * palette.
+ * Scheduled tasks on every connected environment, above the thread list. Collapsed by
+ * default and absent without tasks; a row opens its dialog over the current screen.
  */
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";

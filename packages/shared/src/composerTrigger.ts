@@ -4,13 +4,7 @@ export type ComposerTriggerKind =
   | "slash-command"
   | "slash-model"
   | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default" | "side";
-
-/** A leading /side routes the rest of the prompt to a side conversation. */
-export function parseComposerSideConversationCommand(text: string) {
-  const match = /^\s*\/(?:side|btw)(?=\s|$)/i.exec(text);
-  return match ? { message: text.slice(match[0].length).trim() } : null;
-}
+export type ComposerSlashCommand = "model" | "plan" | "default";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -51,10 +45,7 @@ function isWhitespace(char: string): boolean {
   return char === " " || char === "\n" || char === "\t" || char === "\r";
 }
 
-/**
- * A slash word with a second slash, such as `/tmp/build.sh`, is a path, not a
- * command. The whole word counts, so a caret before the second slash still sees it.
- */
+/** A second slash makes the whole word a path, even when the caret precedes that slash. */
 export function isPathWord(
   text: string,
   wordStart: number,

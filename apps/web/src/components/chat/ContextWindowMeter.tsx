@@ -6,7 +6,7 @@ import {
   formatContextWindowCost,
 } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
-import { useComposerFloatingLayerProps } from "./composerEventScope";
+import { composerFloatingLayerProps } from "./composerEventScope";
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -25,7 +25,6 @@ export function ContextWindowMeter(props: {
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
 }) {
-  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));

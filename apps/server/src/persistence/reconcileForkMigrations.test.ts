@@ -7,6 +7,7 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
+import { migrateForkSideConversations } from "./reconcileForkMigrations.ts";
 
 const seedFork = Effect.fnUntraced(function* (forkId: 48 | 55, withFiling = false) {
   const sql = yield* SqlClient.SqlClient;
@@ -185,6 +186,62 @@ describe("fork migration reconciliation", () => {
         yield* sql`SELECT name FROM sqlite_master WHERE name = 't3_fork_migration_history'`,
         [],
       );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("moves the fork's side presentation onto upstream's side chat lineage once", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations();
+      const lineage = (id: string, parent: string | null) => ({
+        parentThreadId: parent,
+        relationshipToParent: parent === null ? null : "fork",
+        rootThreadId: parent ?? id,
+      });
+      const rows = [
+        {
+          id: "side",
+          lineage: lineage("side", "owner"),
+          presentation: { kind: "side", ownerThreadId: "owner" },
+        },
+        {
+          id: "standard",
+          lineage: lineage("standard", "owner"),
+          presentation: { kind: "standard" },
+        },
+        { id: "unmarked", lineage: lineage("unmarked", null) },
+      ];
+      for (const row of rows) {
+        yield* sql`
+          INSERT INTO orchestration_v2_projection_threads
+            (thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+             created_at, updated_at, payload_json)
+          VALUES (${row.id}, 'project', ${row.id}, 'codex', 'full-access', 'default',
+                  '2026-10-01', '2026-10-01', ${JSON.stringify(row)})
+        `;
+      }
+      const read = sql<{ readonly thread_id: string; readonly payload_json: string }>`
+        SELECT thread_id, payload_json FROM orchestration_v2_projection_threads ORDER BY thread_id
+      `.pipe(
+        Effect.map((found) =>
+          found.map((row) => [row.thread_id, JSON.parse(row.payload_json)] as const),
+        ),
+      );
+
+      yield* migrateForkSideConversations();
+      const migrated = new Map(yield* read);
+      assert.deepStrictEqual(migrated.get("side"), {
+        id: "side",
+        lineage: { ...lineage("side", "owner"), sideChat: true },
+      });
+      assert.deepStrictEqual(migrated.get("standard"), {
+        id: "standard",
+        lineage: lineage("standard", "owner"),
+      });
+      assert.deepStrictEqual(migrated.get("unmarked"), rows[2]);
+
+      yield* migrateForkSideConversations();
+      assert.deepStrictEqual(new Map(yield* read), migrated);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

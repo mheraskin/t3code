@@ -9,7 +9,6 @@ import {
   OrchestrationV2ProviderTurnTokenUsage,
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
-  RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -32,9 +31,7 @@ export class ThreadForkPlanError extends Schema.TaggedError<ThreadForkPlanError>
   },
 ) {}
 
-/**
- * `waiting` is provider-finished with checkpoint capture still pending.
- */
+/** waiting means provider-finished with checkpoint capture pending. */
 export function isForkableSourceRunStatus(status: OrchestrationV2Run["status"]): boolean {
   return (
     status === "completed" ||
@@ -54,15 +51,15 @@ export function forkableSourceRunStatusError(
 export interface ThreadForkServiceV2Shape {
   readonly plan: (input: {
     readonly sourceProjection: Pick<OrchestrationV2ThreadProjection, "thread">;
-    readonly sourceRun: OrchestrationV2Run;
+    /** Null only for a side chat whose parent has no stable run yet. */
+    readonly sourceRun: OrchestrationV2Run | null;
     readonly sourceProviderThread: OrchestrationV2ProviderThread | undefined;
     readonly sourceTokenUsage?: OrchestrationV2ProviderTurnTokenUsage | undefined;
     readonly canonicalSourcePoint: OrchestrationV2ContextSourcePoint;
     readonly transferId: ContextTransferId;
     readonly targetThreadId: ThreadId;
     readonly title?: string;
-    readonly presentation?: "standard" | "side";
-    readonly runtimeMode?: RuntimeMode;
+    readonly sideChat?: boolean;
     readonly createdBy: OrchestrationV2Actor;
     readonly creationSource: OrchestrationV2CreationSource;
     readonly createdAt: DateTime.Utc;
@@ -78,21 +75,26 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
   ThreadForkServiceV2,
   ThreadForkServiceV2.of({
     plan: Effect.fn("ThreadForkService.plan")(function* (input) {
-      if (!isForkableSourceRunStatus(input.sourceRun.status)) {
-        return yield* new ThreadForkPlanError({
-          sourceThreadId: input.sourceProjection.thread.id,
-          targetThreadId: input.targetThreadId,
-          cause: forkableSourceRunStatusError(input.sourceRun),
-        });
-      }
+      const { sourceRun } = input;
+      const sourceLineage = input.sourceProjection.thread.lineage;
+      // A task a linked environment delegated here is a subagent of a remote thread.
+      // Side chats are full threads in this fork, so a side chat may start its own side chat.
       if (
-        input.presentation === "side" &&
-        (input.sourceRun.status !== "completed" || input.sourceRun.checkpointId === null)
+        input.sideChat &&
+        (sourceLineage.relationshipToParent === "subagent" ||
+          input.sourceProjection.thread.delegatedFrom !== undefined)
       ) {
         return yield* new ThreadForkPlanError({
           sourceThreadId: input.sourceProjection.thread.id,
           targetThreadId: input.targetThreadId,
-          cause: "Side conversations need a completed turn with a checkpoint.",
+          cause: "A subagent cannot start a side chat.",
+        });
+      }
+      if (sourceRun !== null && !isForkableSourceRunStatus(sourceRun.status)) {
+        return yield* new ThreadForkPlanError({
+          sourceThreadId: input.sourceProjection.thread.id,
+          targetThreadId: input.targetThreadId,
+          cause: forkableSourceRunStatusError(sourceRun),
         });
       }
       const targetThread: OrchestrationV2AppThread = {
@@ -105,28 +107,23 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         creationSource: input.creationSource,
         id: input.targetThreadId,
         title: input.title ?? `${input.sourceProjection.thread.title} fork`,
-        presentation:
-          input.presentation === "side"
-            ? { kind: "side", ownerThreadId: input.sourceProjection.thread.id }
-            : { kind: "standard" },
-        runtimeMode:
-          input.runtimeMode ??
-          (input.presentation === "side"
-            ? "approval-required"
-            : input.sourceProjection.thread.runtimeMode),
         filedUnderThreadId: null,
         legacyFork: undefined,
+        // The source's title job completes only on the source thread.
+        titleRegeneration: null,
+        // Side chats share the parent's worktree, so they start supervised.
+        ...(input.sideChat ? { runtimeMode: "approval-required" as const } : {}),
         activeProviderThreadId: null,
         lineage: {
           parentThreadId: input.sourceProjection.thread.id,
           relationshipToParent: "fork",
           rootThreadId: input.sourceProjection.thread.lineage.rootThreadId,
+          ...(input.sideChat ? { sideChat: true } : {}),
         },
-        forkedFrom: {
-          type: "run",
-          threadId: input.sourceProjection.thread.id,
-          runId: input.sourceRun.id,
-        },
+        forkedFrom:
+          sourceRun === null
+            ? null
+            : { type: "run", threadId: input.sourceProjection.thread.id, runId: sourceRun.id },
         createdAt: input.createdAt,
         updatedAt: input.createdAt,
         archivedAt: null,
@@ -134,6 +131,8 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         settledAt: null,
         snoozedUntil: null,
         snoozedAt: null,
+        // A guest link belongs to the thread it was made for.
+        guestShare: null,
         lastVisitedAt: null,
         // A fork is a new thread; it does not inherit how often the source was opened.
         opens: null,
@@ -146,10 +145,11 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         targetThreadId: input.targetThreadId,
         sourcePoint: input.canonicalSourcePoint,
         basePoint: null,
-        sourceProviderInstanceId: input.sourceRun.providerInstanceId,
+        sourceProviderInstanceId:
+          sourceRun?.providerInstanceId ?? input.sourceProjection.thread.providerInstanceId,
         // Only native forks retain this context; portable handoffs rebuild it.
         sourceTokenUsage:
-          (input.sourceRun.status === "completed" || input.sourceRun.status === "waiting") &&
+          (sourceRun?.status === "completed" || sourceRun?.status === "waiting") &&
           input.sourceProviderThread?.nativeThreadRef?.strength === "strong"
             ? input.sourceTokenUsage
             : undefined,

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
-const refreshProviders = vi.hoisted(() => vi.fn());
 vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
 
 vi.mock("../../state/queries", () => ({
@@ -10,49 +9,59 @@ vi.mock("../../state/queries", () => ({
 }));
 vi.mock("../../state/use-composer-drafts", () => ({
   getComposerDraftSnapshot: vi.fn(),
-  readComposerDraftSelection: vi.fn(),
   setComposerDraftContext: vi.fn(),
+  useComposerDraftSelection: vi.fn(),
 }));
 vi.mock("../../lib/uuid", () => ({ uuidv4: () => "context-id" }));
 vi.mock("../../state/server", () => ({
-  serverEnvironment: { refreshProviders: Symbol("refreshProviders") },
-}));
-vi.mock("../../state/use-atom-command", () => ({
-  useAtomCommand: () => refreshProviders,
+  serverEnvironment: {
+    providersValueAtom: vi.fn(),
+    refreshProviders: Symbol("refreshProviders"),
+  },
 }));
 
 import {
   buildComposerSlashCommandItems,
   resolveComposerCommandSelection,
+  resolveComposerMenuSelection,
 } from "./use-composer-command-menu";
 
-describe("mobile slash commands", () => {
-  it("offers side conversations locally only for supported thread composers", () => {
-    const input = {
-      query: "side",
-      atMessageStart: true,
-      hasThread: true,
-      offersSideConversations: true,
-      allowInteractionMode: false,
-      selectedProviderStatus: null,
-    };
-    expect(buildComposerSlashCommandItems(input).map((item) => item.label)).toEqual(["/side"]);
-    expect(buildComposerSlashCommandItems({ ...input, hasThread: false })).toEqual([]);
-    expect(buildComposerSlashCommandItems({ ...input, offersSideConversations: false })).toEqual(
-      [],
-    );
-    expect(buildComposerSlashCommandItems({ ...input, atMessageStart: false })).toEqual([]);
-    const side = buildComposerSlashCommandItems(input)[0];
-    if (!side) throw new Error("Expected /side");
+describe("resolveComposerMenuSelection", () => {
+  it("prefers the caret an insertion placed in the current draft text", () => {
     expect(
-      resolveComposerCommandSelection({
-        draftMessage: "/si",
-        trigger: { rangeStart: 0, rangeEnd: 3 },
-        item: side,
-        allowInteractionMode: false,
+      resolveComposerMenuSelection({
+        draftMessage: "hello @chip ",
+        ownerKey: "draft-a",
+        inserted: { start: 12, end: 12 },
+        local: { ownerKey: "draft-a", start: 2, end: 2 },
       }),
-    ).toEqual({ text: "/side ", cursor: 6, interactionMode: null });
+    ).toEqual({ start: 12, end: 12 });
   });
+
+  it("clamps the composer's own caret when the draft shrinks", () => {
+    expect(
+      resolveComposerMenuSelection({
+        draftMessage: "hi",
+        ownerKey: "draft-a",
+        inserted: null,
+        local: { ownerKey: "draft-a", start: 5, end: 9 },
+      }),
+    ).toEqual({ start: 2, end: 2 });
+  });
+
+  it("starts at the end of the draft after switching owners", () => {
+    expect(
+      resolveComposerMenuSelection({
+        draftMessage: "other draft",
+        ownerKey: "draft-b",
+        inserted: null,
+        local: { ownerKey: "draft-a", start: 1, end: 1 },
+      }),
+    ).toEqual({ start: 11, end: 11 });
+  });
+});
+
+describe("mobile slash commands", () => {
   const antigravity = {
     driver: ProviderDriverKind.make("antigravity"),
     showInteractionModeToggle: false,

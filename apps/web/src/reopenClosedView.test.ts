@@ -1,6 +1,5 @@
 import {
   DEFAULT_CLIENT_SETTINGS,
-  ThreadId,
   type PreviewSessionSnapshot,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -41,31 +40,6 @@ beforeEach(() => {
 });
 
 describe("reopenClosedView", () => {
-  it("restores a conversation tab without a project workspace", async () => {
-    const child = ThreadId.make("side-child");
-    const openPreview = vi.fn();
-    expect(
-      await reopenClosedView(
-        {
-          kind: "panel-tab",
-          threadRef,
-          surface: {
-            kind: "conversation",
-            id: "conversation:side-child",
-            resourceId: child,
-            title: "Side question",
-          },
-        },
-        { openPreview, workspaceAvailable: false },
-      ),
-    ).toBe(true);
-    const panel = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
-    expect(panel.activeSurfaceId).toBe("conversation:side-child");
-    expect(panel.surfaces).toMatchObject([
-      { kind: "conversation", resourceId: child, title: "Side question" },
-    ]);
-    expect(openPreview).not.toHaveBeenCalled();
-  });
   it("restores a file tab at its line without creating a browser session", async () => {
     const openPreview = vi.fn();
     const reopened = await reopenClosedView(
@@ -160,6 +134,7 @@ describe("planNextReopen", () => {
     environmentKnown: true,
     catalogReady: true,
     ownerExists: true,
+    sideChatExists: true,
     shellLive: true,
     panel: { isOpen: false, activeSurfaceId: null, surfaces: [] },
   };
@@ -188,6 +163,18 @@ describe("planNextReopen", () => {
       [{ ...known, ownerExists: false }, known],
       [],
       "b",
+    ],
+    [
+      "skips but keeps a side chat deleted from a live shell",
+      [{ ...known, sideChatExists: false }, known],
+      [],
+      "b",
+    ],
+    [
+      "waits when a cached shell lacks the side chat",
+      [{ ...known, sideChatExists: false, shellLive: false }, known],
+      [],
+      null,
     ],
     [
       "waits when a cached shell lacks the thread",

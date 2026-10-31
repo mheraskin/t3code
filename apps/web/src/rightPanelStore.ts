@@ -13,7 +13,6 @@ import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
 const RIGHT_PANEL_KINDS = [
-  "conversation",
   "diff",
   "files",
   "file",
@@ -22,6 +21,7 @@ const RIGHT_PANEL_KINDS = [
   "terminal",
   "pull-request",
   "pull-requests",
+  "side-chat",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -35,7 +35,6 @@ export interface DeviceTabTarget {
 }
 
 export type RightPanelSurface =
-  | { id: `conversation:${string}`; kind: "conversation"; resourceId: ThreadId; title?: string }
   | { id: `browser:${string}`; kind: "preview"; resourceId: string }
   | { id: "browser:new"; kind: "preview"; resourceId: null }
   | { id: "device" | `device:${string}`; kind: "device"; target?: DeviceTabTarget; title?: string }
@@ -61,19 +60,13 @@ export type RightPanelSurface =
       revealLine: number | null;
       revealRequestId: number;
       attachment?: ChatFileAttachment;
-      /**
-       * Set when breadcrumbs moved a folder browser up from a deeper path: the
-       * deepest workspace path the breadcrumbs keep offering on the way back down.
-       */
+      /** Deepest workspace path retained for navigating back down after moving up. */
       folderTrail?: string;
     }
   | {
       id: `pull-request:${string}`;
       kind: "pull-request";
-      /**
-       * The list spans every connected one, so two of them can hold the same project id; a
-       * panel beside a thread leaves this out and takes the environment from its own ref.
-       */
+      /** Cross-environment lists can repeat project ids; thread panels inherit their ref's environment. */
       environmentId?: string;
       projectId: string;
       host?: string;
@@ -82,11 +75,11 @@ export type RightPanelSurface =
       url?: string;
       detailTab?: PullRequestDetailTab;
     }
-  | { id: "pull-requests"; kind: "pull-requests" };
+  | { id: "pull-requests"; kind: "pull-requests" }
+  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v15 lets any related conversation open beside its owner.
-const RIGHT_PANEL_STORAGE_VERSION = 15;
+const RIGHT_PANEL_STORAGE_VERSION = 14;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
@@ -118,10 +111,8 @@ interface RightPanelStoreState {
   userActionRevisionByThreadKey: Record<string, number>;
   closeRevisionByThreadKey: Record<string, number>;
   getUserActionRevision: (ref: ScopedThreadRef) => number;
-  /**
-   * Refused when the user made a panel choice after
-   * `expectedUserActionRevision` was read.
-   */
+  markUserAction: (ref: ScopedThreadRef) => number;
+  /** Refused if the user chose a panel after expectedUserActionRevision was read. */
   openProactive: (
     ref: ScopedThreadRef,
     request:
@@ -132,19 +123,14 @@ interface RightPanelStoreState {
   ) => boolean;
   open: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "conversation">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "side-chat">,
   ) => void;
+  openSideChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
-  openConversation: (ref: ScopedThreadRef, threadId: ThreadId, title?: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
-  /**
-   * Moves the folder browser in `surfaceId` to `relativePath` in place, so walking
-   * the breadcrumbs does not leave a tab behind per folder. `""` is the workspace
-   * root, which is the files explorer. `folderTrail` is kept for the way back down.
-   * `keepSource` opens the folder beside the source tab instead, for a file preview.
-   */
+  /** Moves in place; "" opens the root explorer. folderTrail keeps the return path; keepSource opens beside the source. */
   navigateFolder: (
     ref: ScopedThreadRef,
     surfaceId: string,
@@ -197,7 +183,7 @@ interface RightPanelStoreState {
   toggleVisibility: (ref: ScopedThreadRef) => void;
   toggle: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "conversation">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "side-chat">,
   ) => void;
   setThreadPanelOpen: (
     ref: ScopedThreadRef,
@@ -220,7 +206,7 @@ const DEFAULT_THREAD_PANEL_VISIBILITY: ThreadPanelVisibility = {
 };
 
 const singletonSurface = (
-  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "conversation">,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "side-chat">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -399,11 +385,39 @@ const automaticUpdate = (
   ...updateThread(state, threadKey, updater),
 });
 
+// A side chat pane has no panel of its own, so its panel actions open in its parent's panel.
+const panelHosts = new Map<string, ScopedThreadRef>();
+
+/** Routes `guest`'s panel actions to `host`'s panel until the returned cleanup runs. */
+export function hostRightPanel(guest: ScopedThreadRef, host: ScopedThreadRef): () => void {
+  const guestKey = scopedThreadKey(guest);
+  panelHosts.set(guestKey, host);
+  return () => {
+    if (panelHosts.get(guestKey) === host) panelHosts.delete(guestKey);
+  };
+}
+
+/** The thread whose panel shows `ref`'s panel actions, so it also owns their browser tabs. */
+export function rightPanelHostRef(ref: ScopedThreadRef): ScopedThreadRef {
+  return panelHosts.get(scopedThreadKey(ref)) ?? ref;
+}
+
 const userAction = (
+  state: RightPanelStoreState,
+  guestKey: string,
+  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+  closesView = false,
+): Partial<RightPanelStoreState> => {
+  const host = panelHosts.get(guestKey);
+  const threadKey = host === undefined ? guestKey : scopedThreadKey(host);
+  return userActionOnThread(state, threadKey, updater, closesView);
+};
+
+const userActionOnThread = (
   state: RightPanelStoreState,
   threadKey: string,
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
-  closesView = false,
+  closesView: boolean,
 ): Partial<RightPanelStoreState> => ({
   ...updateThread(state, threadKey, (current) => {
     const next = updater(current);
@@ -469,21 +483,6 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     const kind = (surface as { kind?: string }).kind;
                     if (kind === "plan" || kind === "agents") return [];
-                    if (kind === "side-conversation" || kind === "conversation") {
-                      if (!("resourceId" in surface) || typeof surface.resourceId !== "string")
-                        return [];
-                      const resourceId = ThreadId.make(surface.resourceId);
-                      return [
-                        {
-                          id: `conversation:${resourceId}`,
-                          kind: "conversation",
-                          resourceId,
-                          ...("title" in surface && typeof surface.title === "string"
-                            ? { title: surface.title }
-                            : {}),
-                        },
-                      ];
-                    }
                     if (
                       (surface.kind === "file" || surface.kind === "files") &&
                       "folderTrail" in surface &&
@@ -559,14 +558,10 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                   })
                 : [];
               const rawActiveSurfaceId = validThreadState?.activeSurfaceId;
-              const requestedActiveSurfaceId =
-                typeof rawActiveSurfaceId === "string" && rawActiveSurfaceId.startsWith("side:")
-                  ? `conversation:${rawActiveSurfaceId.slice(5)}`
-                  : rawActiveSurfaceId;
               const persistedActiveSurfaceId = surfaces.some(
-                (surface) => surface.id === requestedActiveSurfaceId,
+                (surface) => surface.id === rawActiveSurfaceId,
               )
-                ? (requestedActiveSurfaceId ?? null)
+                ? (rawActiveSurfaceId ?? null)
                 : rawActiveSurfaceId === "pull-request"
                   ? (surfaces.find((surface) => surface.kind === "pull-request")?.id ?? null)
                   : null;
@@ -635,6 +630,16 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       closeRevisionByThreadKey: {},
       getUserActionRevision: (ref) =>
         get().userActionRevisionByThreadKey[scopedThreadKey(ref)] ?? 0,
+      markUserAction: (ref) => {
+        const revision = get().getUserActionRevision(ref) + 1;
+        set((state) => ({
+          userActionRevisionByThreadKey: {
+            ...state.userActionRevisionByThreadKey,
+            [scopedThreadKey(ref)]: revision,
+          },
+        }));
+        return revision;
+      },
       openProactive: (ref, request, expectedUserActionRevision, activateExisting = false) => {
         let opened = false;
         set((state) => {
@@ -708,6 +713,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             );
           }),
         ),
+      openSideChat: (ref, threadId) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, { id: `side-chat:${threadId}`, kind: "side-chat", threadId }),
+          ),
+        ),
       renameDevice: (ref, surfaceId, title) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => ({
@@ -718,17 +729,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 : surface,
             ),
           })),
-        ),
-      openConversation: (ref, threadId, title) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) =>
-            upsertSurface(current, {
-              id: `conversation:${threadId}`,
-              kind: "conversation",
-              resourceId: threadId,
-              ...(title === undefined ? {} : { title }),
-            }),
-          ),
         ),
       openBrowser: (ref, tabId) =>
         set((state) =>
@@ -820,7 +820,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 ? { ...singletonSurface("files"), ...trail }
                 : { ...fileSurface(relativePath, null, 1), ...trail };
             const source = current.surfaces[index]!;
-            // A tab already showing the target wins, so its state is never replaced.
             const existing = current.surfaces.some(
               (surface, i) => i !== index && surface.id === target.id,
             );
@@ -829,7 +828,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 const kept = keepSource ? [source] : [];
                 return existing ? kept : [...kept, target];
               }
-              // Like openFile: a file surface replaces the standalone explorer.
               return !existing && target.kind === "file" && surface.kind === "files"
                 ? []
                 : [surface];
@@ -1022,8 +1020,14 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               (surface) => surface.id === current.activeSurfaceId,
             );
             const fallbackBrowser = surfaces.find((surface) => surface.kind === "preview");
+            // A closed session tab was the last surface: hide the panel rather than leave it on
+            // the empty picker, as a user close would. A dropped `browser:new` placeholder does not count.
+            const closedLastSessionTab =
+              surfaces.length === 0 &&
+              current.surfaces.some((surface) => surface.kind === "preview" && surface.resourceId);
             return {
               ...current,
+              isOpen: closedLastSessionTab ? false : current.isOpen,
               surfaces,
               activeSurfaceId: activeStillExists
                 ? current.activeSurfaceId

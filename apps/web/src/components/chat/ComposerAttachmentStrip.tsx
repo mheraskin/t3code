@@ -33,7 +33,7 @@ import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
-import { useComposerFloatingLayerProps } from "./composerEventScope";
+import { composerFloatingLayerProps } from "./composerEventScope";
 import type { PreparingComposerImage } from "./preparingComposerImages";
 import {
   attachVideoThumbnail,
@@ -81,6 +81,7 @@ function SnapShotAttachmentFrame({
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the mounted tile into view and registers it as the SnapShot animation destination
   useLayoutEffect(() => {
     const frame = frameRef.current;
     if (!frame || (!animationId && !arrival)) return;
@@ -508,7 +509,6 @@ export function ComposerFilePreviewDialog({
   readonly onRemove: (fileId: string) => void;
   readonly onPreviewFileIdChange: (fileId: string | null) => void;
 }) {
-  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const onClose = () => onPreviewFileIdChange(null);
   return (
     <Dialog
@@ -707,7 +707,8 @@ export function ComposerAttachButton({
             />
           }
         >
-          <PaperclipIcon />
+          {/* The clip's weight sits in its upper loop; 1px down reads as centered on the row. */}
+          <PaperclipIcon className="translate-y-px" />
         </TooltipTrigger>
         <TooltipPopup>Attach files</TooltipPopup>
       </Tooltip>

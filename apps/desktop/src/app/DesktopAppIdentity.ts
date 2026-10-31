@@ -38,7 +38,7 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
     : Option.none();
 };
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const assets = yield* DesktopAssets.DesktopAssets;
   const electronApp = yield* ElectronApp.ElectronApp;
@@ -91,10 +91,8 @@ export const make = Effect.gen(function* () {
 
   const configure = Effect.gen(function* () {
     const commitHash = yield* resolveAboutCommitHash;
-    // Electron removes spaces from this name to build the native User-Agent
-    // product token, but leaves parentheses intact. Keep the runtime name valid
-    // without rewriting preview sessions (which breaks Turnstile, #7110).
-    // Stable builds carry no stage, matching the display name.
+    // Electron strips spaces but keeps parentheses in its User-Agent token, breaking Turnstile in
+    // preview sessions. Stable builds carry no stage, matching the display name.
     const { baseName, stageLabel } = environment.branding;
     yield* electronApp.setName(stageLabel === "Beta" ? baseName : `${baseName} ${stageLabel}`);
     yield* electronApp.setAboutPanelOptions({
@@ -107,9 +105,7 @@ export const make = Effect.gen(function* () {
       yield* electronApp.setAppUserModelId(environment.appUserModelId);
     }
 
-    // Unpackaged runs only. A packaged bundle already carries its icon in
-    // Info.plist, so setting the dock tile again changes nothing except to
-    // overwrite a custom icon the user attached to the app themselves.
+    // Packaged bundles carry their icon in Info.plist; setting it again overwrites the user's custom icon.
     if (environment.platform === "darwin" && !environment.isPackaged) {
       const iconPaths = yield* assets.iconPaths;
       yield* Option.match(iconPaths.png, {

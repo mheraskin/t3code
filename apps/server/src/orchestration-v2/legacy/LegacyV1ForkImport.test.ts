@@ -79,37 +79,35 @@ const insertThread = Effect.fnUntraced(function* (input: {
 });
 
 describe("legacy fork import", () => {
-  it.effect(
-    "preserves side presentation, causal ancestry, independent filing and attachments",
-    () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
-        const projections = yield* ProjectionStore.ProjectionStoreV2;
-        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
-        yield* seed;
-        yield* insertThread({ id: "parent" });
-        yield* insertThread({ id: "filed-parent" });
-        const origin = source("parent", "parent-message");
-        yield* insertThread({
-          id: "side",
-          forkJson: encodeFork(origin),
-          sideChat: true,
-          filedUnder: "filed-parent",
-        });
-        yield* insertThread({
-          id: "nested-side",
-          forkJson: encodeFork({ ...source("side"), sourceHead: true }),
-          sideChat: true,
-        });
-        const attachment = ChatImageAttachment.make({
-          type: "image",
-          id: "att-1",
-          name: "shot.png",
-          mimeType: "image/png",
-          sizeBytes: 1234,
-        });
-        yield* sql`
+  it.effect("preserves side chats, causal ancestry, independent filing and attachments", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+      yield* seed;
+      yield* insertThread({ id: "parent" });
+      yield* insertThread({ id: "filed-parent" });
+      const origin = source("parent", "parent-message");
+      yield* insertThread({
+        id: "side",
+        forkJson: encodeFork(origin),
+        sideChat: true,
+        filedUnder: "filed-parent",
+      });
+      yield* insertThread({
+        id: "nested-side",
+        forkJson: encodeFork({ ...source("side"), sourceHead: true }),
+        sideChat: true,
+      });
+      const attachment = ChatImageAttachment.make({
+        type: "image",
+        id: "att-1",
+        name: "shot.png",
+        mimeType: "image/png",
+        sizeBytes: 1234,
+      });
+      yield* sql`
         INSERT INTO projection_thread_messages
           (message_id, thread_id, role, text, attachments_json, is_streaming, created_at, updated_at)
         VALUES
@@ -122,42 +120,39 @@ describe("legacy fork import", () => {
           ('side-last', 'side', 'assistant', 'Partial response', '[]', 1,
            '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
       `;
-        assert.equal((yield* importer.reconcileShells).importedThreadCount, 4);
-        const side = yield* projections.getThreadProjection(ThreadId.make("side"));
-        assert.deepStrictEqual(side.thread.presentation, {
-          kind: "side",
-          ownerThreadId: ThreadId.make("parent"),
-        });
-        assert.equal(side.thread.filedUnderThreadId, "filed-parent");
-        assert.deepStrictEqual(side.thread.legacyFork, origin);
-        assert.deepStrictEqual(side.thread.lineage, {
-          parentThreadId: ThreadId.make("parent"),
-          relationshipToParent: "fork",
-          rootThreadId: ThreadId.make("parent"),
-        });
-        assert.isNull(side.thread.forkedFrom);
-        assert.isEmpty(side.runs);
-        assert.isEmpty(side.contextTransfers);
-        const nested = yield* projections.getThreadProjection(ThreadId.make("nested-side"));
-        assert.equal(nested.thread.lineage.rootThreadId, "parent");
-        assert.equal(nested.thread.lineage.parentThreadId, "side");
-        assert.isTrue(nested.thread.legacyFork?.sourceHead);
-        yield* importer.ensureTranscript(ThreadId.make("side"));
-        const hydrated = yield* projections.getThreadProjection(ThreadId.make("side"));
-        assert.deepStrictEqual(
-          hydrated.messages.map((message) => message.text),
-          ["First question", "Follow-up", "Partial response"],
-        );
-        assert.deepStrictEqual(hydrated.messages[0]?.attachments, [attachment]);
-        assert.isFalse(hydrated.messages[2]?.streaming);
-        assert.isTrue((yield* maintenance.rebuild).valid);
-        const replayed = yield* projections.getThreadProjection(ThreadId.make("side"));
-        assert.deepStrictEqual(replayed.thread, hydrated.thread);
-        assert.deepStrictEqual(yield* importer.reconcileShells, {
-          importedThreadCount: 0,
-          importedMessageCount: 0,
-        });
-      }).pipe(Effect.provide(TestLayer)),
+      assert.equal((yield* importer.reconcileShells).importedThreadCount, 4);
+      const side = yield* projections.getThreadProjection(ThreadId.make("side"));
+      assert.equal(side.thread.filedUnderThreadId, "filed-parent");
+      assert.deepStrictEqual(side.thread.legacyFork, origin);
+      assert.deepStrictEqual(side.thread.lineage, {
+        parentThreadId: ThreadId.make("parent"),
+        relationshipToParent: "fork",
+        rootThreadId: ThreadId.make("parent"),
+        sideChat: true,
+      });
+      assert.isNull(side.thread.forkedFrom);
+      assert.isEmpty(side.runs);
+      assert.isEmpty(side.contextTransfers);
+      const nested = yield* projections.getThreadProjection(ThreadId.make("nested-side"));
+      assert.equal(nested.thread.lineage.rootThreadId, "parent");
+      assert.equal(nested.thread.lineage.parentThreadId, "side");
+      assert.isTrue(nested.thread.legacyFork?.sourceHead);
+      yield* importer.ensureTranscript(ThreadId.make("side"));
+      const hydrated = yield* projections.getThreadProjection(ThreadId.make("side"));
+      assert.deepStrictEqual(
+        hydrated.messages.map((message) => message.text),
+        ["First question", "Follow-up", "Partial response"],
+      );
+      assert.deepStrictEqual(hydrated.messages[0]?.attachments, [attachment]);
+      assert.isFalse(hydrated.messages[2]?.streaming);
+      assert.isTrue((yield* maintenance.rebuild).valid);
+      const replayed = yield* projections.getThreadProjection(ThreadId.make("side"));
+      assert.deepStrictEqual(replayed.thread, hydrated.thread);
+      assert.deepStrictEqual(yield* importer.reconcileShells, {
+        importedThreadCount: 0,
+        importedMessageCount: 0,
+      });
+    }).pipe(Effect.provide(TestLayer)),
   );
 
   it.effect("keeps invalid and orphan forks visible without inventing ancestry", () =>
@@ -224,7 +219,6 @@ describe("legacy fork import", () => {
         "cycle-b",
       ]) {
         const projection = yield* projections.getThreadProjection(ThreadId.make(id));
-        assert.deepStrictEqual(projection.thread.presentation, { kind: "standard" });
         assert.deepStrictEqual(projection.thread.lineage, {
           parentThreadId: null,
           relationshipToParent: null,
@@ -242,10 +236,10 @@ describe("legacy fork import", () => {
           ?.sourceThreadId,
         "missing",
       );
-      assert.deepStrictEqual(
-        (yield* projections.getThreadProjection(ThreadId.make("shared-turn"))).thread.presentation,
-        { kind: "side", ownerThreadId: ThreadId.make("parent") },
-      );
+      const sharedTurn = (yield* projections.getThreadProjection(ThreadId.make("shared-turn")))
+        .thread.lineage;
+      assert.isTrue(sharedTurn.sideChat);
+      assert.equal(sharedTurn.parentThreadId, "parent");
       assert.deepStrictEqual(yield* importer.reconcileShells, {
         importedThreadCount: 0,
         importedMessageCount: 0,
@@ -274,20 +268,18 @@ describe("legacy fork import", () => {
         yield* sql`
         UPDATE orchestration_v2_projection_threads
         SET payload_json = json_set(
-          json_remove(payload_json, '$.presentation', '$.filedUnderThreadId', '$.legacyFork'),
+          json_remove(payload_json, '$.filedUnderThreadId', '$.legacyFork'),
           '$.lineage', json('{"parentThreadId":null,"relationshipToParent":null,"rootThreadId":"side"}')
         ) WHERE thread_id = 'side'
       `;
         assert.equal((yield* importer.reconcileShells).importedThreadCount, 1);
         const repaired = yield* projections.getThreadProjection(ThreadId.make("side"));
-        assert.deepStrictEqual(repaired.thread.presentation, {
-          kind: "side",
-          ownerThreadId: ThreadId.make("parent"),
-        });
+        assert.isTrue(repaired.thread.lineage.sideChat);
         assert.equal(repaired.thread.lineage.rootThreadId, "parent");
+        const { sideChat: _sideChat, ...promotedLineage } = repaired.thread.lineage;
         const changed = {
           ...repaired.thread,
-          presentation: { kind: "standard" as const },
+          lineage: promotedLineage,
           filedUnderThreadId: null,
           title: "Promoted and renamed",
           runtimeMode: "approval-required" as const,
@@ -314,7 +306,7 @@ describe("legacy fork import", () => {
         const promoted = yield* projections.getThreadProjection(ThreadId.make("side"));
         assert.equal(promoted.thread.title, changed.title);
         assert.equal(promoted.thread.runtimeMode, changed.runtimeMode);
-        assert.deepStrictEqual(promoted.thread.presentation, { kind: "standard" });
+        assert.isUndefined(promoted.thread.lineage.sideChat);
         assert.isNull(promoted.thread.filedUnderThreadId);
         assert.deepStrictEqual(promoted.thread.archivedAt, changed.archivedAt);
         assert.deepStrictEqual(promoted.thread.lineage, changed.lineage);

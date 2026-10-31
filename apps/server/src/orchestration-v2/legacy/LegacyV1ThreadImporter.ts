@@ -80,7 +80,7 @@ interface LegacyForkRow {
 
 type LegacyForkMetadata = Pick<
   OrchestrationV2AppThread,
-  "presentation" | "filedUnderThreadId" | "legacyFork" | "lineage"
+  "filedUnderThreadId" | "legacyFork" | "lineage"
 >;
 
 interface LegacyMessageRow {
@@ -253,7 +253,6 @@ function importedThread(
       rootThreadId: threadId,
     },
     forkedFrom: null,
-    presentation: { kind: "standard" },
     filedUnderThreadId: null,
     ...forkMetadata,
     createdAt: dateTime(row.created_at),
@@ -461,16 +460,13 @@ const make = Effect.gen(function* () {
       const filedUnderThreadId = filings.get(row.thread_id) ?? null;
       const legacyFork = origins.get(row.thread_id);
       metadata.set(row.thread_id, {
-        presentation:
-          row.side_chat === 1 && parentThreadId !== null
-            ? { kind: "side", ownerThreadId: parentThreadId }
-            : { kind: "standard" },
         filedUnderThreadId,
         ...(legacyFork === undefined ? {} : { legacyFork }),
         lineage: {
           parentThreadId,
           relationshipToParent: parentThreadId === null ? null : "fork",
           rootThreadId: roots.get(row.thread_id) ?? ThreadId.make(row.thread_id),
+          ...(row.side_chat === 1 && parentThreadId !== null ? { sideChat: true } : {}),
         },
       });
     }
@@ -613,7 +609,6 @@ const make = Effect.gen(function* () {
          OR json_type(projection.payload_json, '$.pullRequests') IS NULL
          OR json_type(projection.payload_json, '$.branchPullRequest') IS NULL
          OR json_type(projection.payload_json, '$.activeOrderKey') IS NULL
-         OR json_type(projection.payload_json, '$.presentation') IS NULL
          OR json_type(projection.payload_json, '$.filedUnderThreadId') IS NULL
       ORDER BY thread.created_at ASC, thread.thread_id ASC
     `;
@@ -626,7 +621,6 @@ const make = Effect.gen(function* () {
       const legacyPullRequests = legacy.pullRequests ?? [];
       const repaired: OrchestrationV2AppThread = {
         ...current,
-        presentation: current.presentation ?? legacy.presentation,
         filedUnderThreadId:
           current.filedUnderThreadId === undefined
             ? legacy.filedUnderThreadId
@@ -635,7 +629,7 @@ const make = Effect.gen(function* () {
           ? { legacyFork: legacy.legacyFork }
           : {}),
         lineage:
-          current.presentation === undefined &&
+          current.filedUnderThreadId === undefined &&
           current.lineage.parentThreadId === null &&
           current.forkedFrom === null
             ? legacy.lineage
@@ -831,10 +825,7 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  // `transcript_imported_at` is never reset to NULL, so a positive answer
-  // stays valid for the process lifetime; ensureTranscript runs on most
-  // thread reads and command dispatches, so skipping the lock + lookup here
-  // keeps that path off the database entirely after first confirmation.
+  // Both results are final for this process: transcript_imported_at never resets, and only startup shell reconciliation creates legacy rows.
   const confirmedTranscriptThreadIds = new Set<ThreadId>();
 
   const ensureTranscriptBase = (threadId: ThreadId) =>
@@ -849,14 +840,11 @@ const make = Effect.gen(function* () {
         `.pipe(NodeSqliteClient.readOnly);
         const imported = imports[0];
         if (imported === undefined || imported.transcript_imported_at !== null) {
-          if (imported !== undefined) {
-            confirmedTranscriptThreadIds.add(threadId);
-          }
+          confirmedTranscriptThreadIds.add(threadId);
           return { importedThreadCount: 0, importedMessageCount: 0 };
         }
         const messages = yield* listMessages(threadId);
-        // The thread's V1 events are still in the table here. Without the hint
-        // SQLite walks them through the stream index and reads past each payload.
+        // Hint the index to skip V1 events without scanning their payloads.
         const existingRows = yield* sql<{ readonly event_id: string }>`
           SELECT event_id
           FROM orchestration_events INDEXED BY idx_orchestration_events_agent_stream_sequence

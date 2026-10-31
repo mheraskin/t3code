@@ -2,13 +2,13 @@ import type { ContextMenuItem, ThreadId } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 export type ThreadActionMenuId =
+  | "find"
   | "file-under"
   | `file:${string}`
   | "unfile"
-  | "side-conversations"
-  | `open-side:${string}`
   | "new-thread-on-branch"
   | "filter-by-project"
+  | "turn-into-project"
   | "project-settings"
   | "pin"
   | "unpin"
@@ -23,9 +23,11 @@ export type ThreadActionMenuId =
   | "rename"
   | "regenerate-title"
   | "mark-unread"
+  | "share-guest"
   | "copy"
   | "copy-path"
   | "copy-branch"
+  | "copy-thread"
   | "copy-thread-id"
   | "archive"
   | "delete";
@@ -73,8 +75,8 @@ export interface ThreadActionMenuState {
     readonly parentThreadId: ThreadId | null;
     readonly candidates: ReadonlyArray<{ readonly id: ThreadId; readonly title: string }>;
   };
-  readonly sideConversations?: ReadonlyArray<{ readonly id: ThreadId; readonly title: string }>;
   readonly canOperate: boolean;
+  readonly canFind?: boolean;
   readonly branch: string | null;
   readonly projectFilter: {
     readonly label: string;
@@ -86,7 +88,7 @@ export interface ThreadActionMenuState {
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
-  /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
+  /** Archive rejects attached providers, so disable it while running. */
   readonly isRunning: boolean;
   readonly supports: {
     readonly settlement: boolean;
@@ -96,29 +98,35 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** Guest links need their own grant, so the caller checks it instead of `canOperate`. */
+  readonly canShareWithGuest?: boolean;
+  /** A No project thread with its own folder, on a server that can promote it. */
+  readonly canTurnIntoProject?: boolean;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
-  return (
-    !action.startsWith("open-side:") &&
-    ![
-      "new-thread-on-branch",
-      "project-settings",
-      "mark-unread",
-      "copy",
-      "copy-path",
-      "copy-branch",
-      "copy-thread-id",
-      "side-conversations",
-    ].includes(action)
-  );
+  return ![
+    "find",
+    "new-thread-on-branch",
+    "project-settings",
+    "mark-unread",
+    "share-guest",
+    "copy",
+    "copy-path",
+    "copy-branch",
+    "copy-thread",
+    "copy-thread-id",
+  ].includes(action);
 }
 
 export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
+    ...(state.canFind
+      ? [{ id: "find" as const, label: "Find in thread", icon: "text-search" }]
+      : []),
     ...(state.filing
       ? [
           {
@@ -134,19 +142,6 @@ export function buildThreadActionMenuItems(
           ...(state.filing.parentThreadId !== null
             ? [{ id: "unfile" as const, label: "Move out of parent", icon: "folder" }]
             : []),
-        ]
-      : []),
-    ...(state.sideConversations && state.sideConversations.length > 0
-      ? [
-          {
-            id: "side-conversations" as const,
-            label: `Side conversations (${state.sideConversations.length})`,
-            icon: "messages-square",
-            children: state.sideConversations.map((side) => ({
-              id: `open-side:${side.id}` as const,
-              label: side.title,
-            })),
-          },
         ]
       : []),
     ...(state.branch
@@ -186,7 +181,11 @@ export function buildThreadActionMenuItems(
                     id: `snooze:${preset.id}` as const,
                     label: `${preset.label} (${preset.whenLabel})`,
                   })),
-                  { id: "snooze:custom" as const, label: "Custom…", separatorBefore: true },
+                  {
+                    id: "snooze:custom" as const,
+                    label: "Custom…",
+                    separatorBefore: state.snoozePresets.length > 0,
+                  },
                 ],
               },
         ]
@@ -203,6 +202,9 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread", icon: "mail-open" },
+    ...(state.canShareWithGuest
+      ? [{ id: "share-guest" as const, label: "Share with guest", icon: "user-plus" }]
+      : []),
     ...(state.projectFilter
       ? [
           {
@@ -211,6 +213,16 @@ export function buildThreadActionMenuItems(
               ? "Show all projects"
               : `Filter by ${state.projectFilter.label}`,
             icon: "folder-tree",
+          },
+        ]
+      : []),
+    ...(state.canTurnIntoProject
+      ? [
+          {
+            id: "turn-into-project" as const,
+            label: "Turn into project",
+            icon: "folder-plus",
+            disabled: state.isRunning,
           },
         ]
       : []),
@@ -245,6 +257,7 @@ export function buildThreadActionMenuItems(
         ...(state.branch
           ? [{ id: "copy-branch" as const, label: "Branch", icon: "git-branch" }]
           : []),
+        { id: "copy-thread", label: "Thread", icon: "message-square" },
         { id: "copy-thread-id", label: "Thread ID", icon: "hash" },
       ],
     },

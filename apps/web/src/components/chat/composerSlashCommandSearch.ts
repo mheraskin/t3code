@@ -12,11 +12,7 @@ type SlashSearchItem = Extract<
   { type: "slash-command" | "provider-slash-command" | "skill" }
 >;
 
-/**
- * A provider expands a slash command only when it opens the whole message;
- * anywhere else it reaches the agent as literal text, so it is not offered
- * there. /side also routes the whole message from its prefix.
- */
+/** Provider commands, `/side` and `/btw` work only at the message start. */
 export function slashCommandItemsForPromptPosition(
   items: ReadonlyArray<SlashSearchItem>,
   isAtPromptStart: boolean,
@@ -26,8 +22,8 @@ export function slashCommandItemsForPromptPosition(
   }
   return items.filter(
     (item) =>
-      item.type !== "provider-slash-command" &&
-      !(item.type === "slash-command" && item.command === "side"),
+      item.type === "skill" ||
+      (item.type === "slash-command" && item.command !== "side" && item.command !== "btw"),
   );
 }
 

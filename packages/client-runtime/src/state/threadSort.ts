@@ -1,8 +1,6 @@
 import type { ProjectId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { EnvironmentThreadShell } from "./models.ts";
-import * as Arr from "effect/Array";
-import * as Order from "effect/Order";
 
 export interface ThreadSortInput {
   readonly createdAt: string;
@@ -58,7 +56,9 @@ export function sortSettledThreads<T extends SettledThreadTimestampInput & { rea
     })
     .sort(
       (left, right) =>
-        right.timestampMs - left.timestampMs || left.thread.id.localeCompare(right.thread.id),
+        right.timestampMs - left.timestampMs ||
+        // Plain order, as the server pages ties (ids mix upper and lower case).
+        (left.thread.id < right.thread.id ? -1 : left.thread.id > right.thread.id ? 1 : 0),
     )
     .map(({ thread }) => thread);
 }
@@ -330,23 +330,6 @@ export function sortActiveThreadsByOrderKey<
   });
 }
 
-export function planPinnedMove(input: {
-  readonly orderedIds: readonly string[];
-  readonly keysById: ReadonlyMap<string, string | null | undefined>;
-  readonly movedId: string;
-  readonly direction: "up" | "down";
-}): ReadonlyArray<{ readonly id: string; readonly orderKey: string }> | null {
-  const { orderedIds, keysById, movedId, direction } = input;
-  const from = orderedIds.indexOf(movedId);
-  if (from === -1) return null;
-  const to = direction === "up" ? from - 1 : from + 1;
-  if (to < 0 || to >= orderedIds.length) return null;
-  const newOrder = [...orderedIds];
-  newOrder.splice(from, 1);
-  newOrder.splice(to, 0, movedId);
-  return planPinnedReorder({ orderedIds: newOrder, keysById, movedId });
-}
-
 export interface ThreadWorktreeGroupInput {
   readonly projectId: string;
   readonly environmentId?: string | undefined;
@@ -354,12 +337,9 @@ export interface ThreadWorktreeGroupInput {
   readonly branch?: string | null | undefined;
 }
 
-/** Threads share a group when they work on the same branch of the same
-    project on one environment. Git checks a branch out in one place per
-    repository, so the branch names the checkout. `projectKey` should be the
-    logical (repository) project: users often register each worktree as its
-    own project record, and a thread's record need not match the worktree it
-    runs in. The path only keys threads that have no branch. */
+/** Git checks a branch out in one place per repository, so the branch names the checkout.
+    `projectKey` is the logical project, since worktrees are often separate project records;
+    the path keys only threads without a branch. */
 export function threadWorktreeGroupKey(
   thread: ThreadWorktreeGroupInput,
   projectKey: string = thread.projectId,

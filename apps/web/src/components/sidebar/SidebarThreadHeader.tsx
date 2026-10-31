@@ -1,17 +1,6 @@
-/**
- * The sidebar header controls, which live in the titlebar row beside the brand.
- *
- * At rest the row holds a search button and, with projects, the project scope
- * and new-project buttons, then new thread. Search opens in place of the whole
- * row (`SidebarThreadSearchBar`) and closes back to it once the query is
- * cleared, so the thread list keeps the height the old search row took.
- * The scope icon swaps to the project favicon while a project is selected,
- * so the header still names the scope.
- *
- * The scope picker itself is passed in: its combobox state lives with the rest
- * of the sidebar's scope logic. `anchorRef` lands on the button group so the
- * picker's popup can anchor to it rather than to its 28px trigger.
- */
+// Header controls share the titlebar row; search replaces the row until its query clears.
+// The scope picker is passed in because its state lives with the sidebar's scope logic, and
+// `anchorRef` sits on the button group so the popup anchors there, not on the 28px trigger.
 import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
@@ -118,9 +107,7 @@ export function SidebarThreadSearchBar({
   onClose,
 }: SidebarThreadSearchBarProps) {
   const resultsVisible = isSearching && searchResultCount > 0;
-  // Results shrink as the query narrows, so the active index can outrun the
-  // list; pointing aria-activedescendant at a removed option strands the
-  // screen reader on nothing.
+  // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
 
   return (

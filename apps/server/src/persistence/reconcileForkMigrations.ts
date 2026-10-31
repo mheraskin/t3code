@@ -154,3 +154,29 @@ export const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(func
     }),
   );
 });
+
+/**
+ * The fork once marked side conversations with `presentation: {kind: "side"}`; they now use
+ * upstream's `lineage.sideChat`. Idempotent: rows without `presentation` are left alone.
+ */
+export const migrateForkSideConversations = Effect.fn("migrateForkSideConversations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql<{ readonly name: string }>`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'orchestration_v2_projection_threads'
+  `;
+  if (tables.length === 0) return;
+  yield* sql`
+    UPDATE orchestration_v2_projection_threads
+    SET payload_json = json_remove(
+      CASE
+        WHEN json_extract(payload_json, '$.presentation.kind') = 'side'
+          AND json_extract(payload_json, '$.lineage.parentThreadId') IS NOT NULL
+          THEN json_set(payload_json, '$.lineage.sideChat', json('true'))
+        ELSE payload_json
+      END,
+      '$.presentation'
+    )
+    WHERE json_type(payload_json, '$.presentation') IS NOT NULL
+  `;
+});

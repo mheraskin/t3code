@@ -1,7 +1,8 @@
 import { assert, it } from "@effect/vitest";
 import {
-  CheckpointId,
+  CommandId,
   ContextTransferId,
+  EnvironmentId,
   MessageId,
   NodeId,
   type ModelSelection,
@@ -112,20 +113,24 @@ function makeSourceProjection(sourceRun: OrchestrationV2Run): OrchestrationV2Thr
 
 const planFork = (
   sourceRun: OrchestrationV2Run,
-  options: {
+  sourceProjection = makeSourceProjection(sourceRun),
+  {
+    sourceThread,
+    ...options
+  }: {
+    readonly sideChat?: boolean;
     readonly presentation?: "standard" | "side";
     readonly runtimeMode?: OrchestrationV2AppThread["runtimeMode"];
     readonly sourceThread?: OrchestrationV2AppThread;
-    readonly sourceProjection?: OrchestrationV2ThreadProjection;
   } = {},
 ) =>
   Effect.gen(function* () {
     const service = yield* ThreadForkService.ThreadForkServiceV2;
     return yield* service.plan({
-      sourceProjection: options.sourceProjection ?? {
-        ...makeSourceProjection(sourceRun),
-        thread: options.sourceThread ?? makeSourceThread(),
-      },
+      sourceProjection:
+        sourceThread === undefined
+          ? sourceProjection
+          : { ...sourceProjection, thread: sourceThread },
       sourceRun,
       sourceProviderThread: undefined,
       canonicalSourcePoint: {
@@ -135,11 +140,10 @@ const planFork = (
       transferId: ContextTransferId.make("context-transfer:fork-snoozed-source"),
       targetThreadId,
       title: "Awake fork",
+      ...options,
       createdBy: "user",
       creationSource: "mobile",
       createdAt: forkCreatedAt,
-      ...(options.presentation === undefined ? {} : { presentation: options.presentation }),
-      ...(options.runtimeMode === undefined ? {} : { runtimeMode: options.runtimeMode }),
     });
   }).pipe(Effect.provide(ThreadForkService.layer));
 
@@ -169,6 +173,24 @@ it.effect("keeps a fork awake when its source thread is snoozed", () =>
       threadId: sourceThreadId,
       runId: sourceRunId,
     });
+  }),
+);
+
+it.effect("starts a fork without the source thread's pending title regeneration", () =>
+  Effect.gen(function* () {
+    const sourceRun = makeSourceRun("completed");
+    const titleRegeneration = {
+      requestId: CommandId.make("command:fork-source-title"),
+      startedAt: snoozedAt,
+    };
+    const sourceProjection = {
+      ...makeSourceProjection(sourceRun),
+      thread: { ...makeSourceThread(), titleRegeneration },
+    };
+    const result = yield* planFork(sourceRun, sourceProjection);
+
+    assert.isNull(result.targetThread.titleRegeneration);
+    assert.deepEqual(sourceProjection.thread.titleRegeneration, titleRegeneration);
   }),
 );
 
@@ -232,7 +254,7 @@ it.effect("preserves pull request context without inheriting any watches", () =>
         branchPullRequest: legacyLink,
       },
     };
-    const result = yield* planFork(sourceRun, { sourceProjection });
+    const result = yield* planFork(sourceRun, sourceProjection);
 
     assert.deepEqual(result.targetThread.pullRequests, links);
     assert.deepEqual(result.targetThread.linkedPullRequest, legacyLink);
@@ -243,36 +265,14 @@ it.effect("preserves pull request context without inheriting any watches", () =>
   }),
 );
 
-it.effect("creates a supervised side conversation with the source as its owner", () =>
-  Effect.gen(function* () {
-    const sourceRun = {
-      ...makeSourceRun("completed"),
-      checkpointId: CheckpointId.make("checkpoint:side-source"),
-    };
-    const result = yield* planFork(sourceRun, { presentation: "side" });
-    assert.deepEqual(result.targetThread.presentation, {
-      kind: "side",
-      ownerThreadId: sourceThreadId,
-    });
-    assert.equal(result.targetThread.runtimeMode, "approval-required");
-    assert.isNull(result.targetThread.filedUnderThreadId);
-    assert.equal(result.transfer.sourcePoint.runId, sourceRun.id);
-    assert.equal(result.transfer.status, "pending");
-    const selected = yield* planFork(sourceRun, {
-      presentation: "side",
-      runtimeMode: "full-access",
-    });
-    assert.equal(selected.targetThread.runtimeMode, "full-access");
-  }),
-);
-
 it.effect(
-  "ordinary forks clear side presentation and manual filing inherited from the source",
+  "ordinary forks clear the side chat mark and manual filing inherited from the source",
   () =>
     Effect.gen(function* () {
+      const base = makeSourceThread();
       const sourceThread: OrchestrationV2AppThread = {
-        ...makeSourceThread(),
-        presentation: { kind: "side", ownerThreadId: ThreadId.make("thread:owner") },
+        ...base,
+        lineage: { ...base.lineage, sideChat: true },
         filedUnderThreadId: ThreadId.make("thread:filed-under"),
         legacyFork: {
           sourceThreadId: ThreadId.make("thread:legacy-source"),
@@ -281,18 +281,19 @@ it.effect(
           forkedAt: "2026-07-24T09:00:00.000Z",
         },
       };
-      const result = yield* planFork(makeSourceRun("completed"), { sourceThread });
-      assert.deepEqual(result.targetThread.presentation, { kind: "standard" });
+      const result = yield* planFork(makeSourceRun("completed"), undefined, { sourceThread });
+      assert.isUndefined(result.targetThread.lineage.sideChat);
       assert.isNull(result.targetThread.filedUnderThreadId);
       assert.isUndefined(result.targetThread.legacyFork);
       assert.equal(result.targetThread.runtimeMode, sourceThread.runtimeMode);
     }),
 );
 
-it("keeps delegated children visible as ordinary threads when their parent is a side conversation", () => {
+it("keeps delegated children out of side chats when their parent is a side chat", () => {
+  const base = makeSourceThread();
   const parentThread: OrchestrationV2AppThread = {
-    ...makeSourceThread(),
-    presentation: { kind: "side", ownerThreadId: ThreadId.make("thread:owner") },
+    ...base,
+    lineage: { ...base.lineage, sideChat: true },
     filedUnderThreadId: ThreadId.make("thread:filed-under"),
   };
   const child = makeSubagentChildThread({
@@ -307,23 +308,11 @@ it("keeps delegated children visible as ordinary threads when their parent is a 
     createdBy: "agent",
     creationSource: "mcp",
   });
-  assert.deepEqual(child.presentation, { kind: "standard" });
+  assert.isUndefined(child.lineage.sideChat);
   assert.isNull(child.filedUnderThreadId);
   assert.equal(child.lineage.relationshipToParent, "subagent");
   assert.equal(child.lineage.parentThreadId, sourceThreadId);
 });
-
-it.effect("rejects a side conversation before a completed checkpoint exists", () =>
-  Effect.gen(function* () {
-    for (const status of ["completed", "waiting", "failed", "interrupted"] as const) {
-      const error = yield* planFork(makeSourceRun(status), { presentation: "side" }).pipe(
-        Effect.flip,
-      );
-      assert.equal(error._tag, "ThreadForkPlanError");
-      assert.equal(error.cause, "Side conversations need a completed turn with a checkpoint.");
-    }
-  }),
-);
 
 it.effect("rejects in-progress and rolled-back fork sources", () =>
   Effect.gen(function* () {
@@ -335,5 +324,65 @@ it.effect("rejects in-progress and rolled-back fork sources", () =>
       assert.equal(error.targetThreadId, targetThreadId);
       assert.equal(error.cause, ThreadForkService.forkableSourceRunStatusError(sourceRun));
     }
+  }),
+);
+
+it.effect("marks only requested forks as supervised side chats", () =>
+  Effect.gen(function* () {
+    const sourceRun = makeSourceRun("completed");
+    const sideChat = yield* planFork(sourceRun, makeSourceProjection(sourceRun), {
+      sideChat: true,
+    });
+    assert.isTrue(sideChat.targetThread.lineage.sideChat);
+    assert.equal(sideChat.targetThread.runtimeMode, "approval-required");
+
+    const sideChatSource = makeSourceProjection(sourceRun);
+    const sideChatProjection = {
+      ...sideChatSource,
+      thread: {
+        ...sideChatSource.thread,
+        lineage: { ...sideChatSource.thread.lineage, sideChat: true },
+      },
+    };
+    const forkOfSideChat = yield* planFork(sourceRun, sideChatProjection);
+    assert.isUndefined(forkOfSideChat.targetThread.lineage.sideChat);
+    assert.equal(forkOfSideChat.targetThread.runtimeMode, "full-access");
+
+    // Side chats are full threads in this fork, so one may start its own side chat.
+    const nested = yield* planFork(sourceRun, sideChatProjection, { sideChat: true });
+    assert.isTrue(nested.targetThread.lineage.sideChat);
+    assert.equal(nested.targetThread.lineage.parentThreadId, sideChatProjection.thread.id);
+
+    const subagentSource = makeSourceProjection(sourceRun);
+    const fromSubagent = yield* planFork(
+      sourceRun,
+      {
+        ...subagentSource,
+        thread: {
+          ...subagentSource.thread,
+          lineage: { ...subagentSource.thread.lineage, relationshipToParent: "subagent" },
+        },
+      },
+      { sideChat: true },
+    ).pipe(Effect.flip);
+    assert.equal(fromSubagent.cause, "A subagent cannot start a side chat.");
+
+    const delegatedSource = makeSourceProjection(sourceRun);
+    const fromDelegated = yield* planFork(
+      sourceRun,
+      {
+        ...delegatedSource,
+        thread: {
+          ...delegatedSource.thread,
+          delegatedFrom: {
+            environmentId: EnvironmentId.make("linked-environment"),
+            threadId: ThreadId.make("linked-parent"),
+            title: "Linked parent",
+          },
+        },
+      },
+      { sideChat: true },
+    ).pipe(Effect.flip);
+    assert.equal(fromDelegated.cause, "A subagent cannot start a side chat.");
   }),
 );

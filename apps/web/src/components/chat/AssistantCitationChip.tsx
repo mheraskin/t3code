@@ -29,7 +29,7 @@ import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { AssistantCitationCommentEditor } from "./AssistantCitationCommentEditor";
 import { resolveAssistantCitationCommentDismissal } from "./assistantCitationCommentDismissal";
 import { observeAssistantCitationCommentSource } from "./AssistantCitationSource";
-import { useComposerFloatingLayerProps } from "./composerEventScope";
+import { composerFloatingLayerProps } from "./composerEventScope";
 import { observeResize } from "~/lib/observeResize";
 
 export function AssistantCitationChip({
@@ -50,7 +50,6 @@ export function AssistantCitationChip({
     onRestoreFocus?: () => void;
   };
 }) {
-  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const navigate = useNavigate();
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const commentPopupRef = useRef<HTMLDivElement>(null);
@@ -60,6 +59,7 @@ export function AssistantCitationChip({
   const commentOpen = commentEditor?.open ?? false;
   const sourceAnchor = commentEditor?.sourceAnchor;
   const activeSourceAnchor = sourceAnchor === unavailableSourceAnchor ? undefined : sourceAnchor;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drops the uncommitted comment draft held in a ref once the parent closes the comment editor
   useEffect(() => {
     if (!commentOpen) draftCommentRef.current = null;
   }, [commentOpen]);
@@ -80,6 +80,7 @@ export function AssistantCitationChip({
       setUnavailableSourceAnchor(sourceAnchor);
     }
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the cited DOM source while the comment editor is open and reacts when it disappears
   useEffect(() => {
     if (!commentOpen || sourceAnchor === unavailableSourceAnchor) return;
     const anchor = sourceAnchor ?? findAssistantCitationSourceAnchor(document, citation);
@@ -125,7 +126,7 @@ export function AssistantCitationChip({
   const composerSourceLink = (
     <Link
       {...sourceLinkProps}
-      className="inline-flex h-full min-w-0 items-center gap-[0.33em] rounded-sm text-inherit no-underline focus-visible:outline-2 focus-visible:outline-foreground"
+      className="inline-flex min-w-0 items-center gap-[0.2em] self-baseline text-inherit no-underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current rounded-sm"
       aria-label={`View cited assistant text: ${label}`}
     >
       <QuoteIcon aria-hidden="true" />

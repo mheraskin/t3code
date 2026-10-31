@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { useClosedViewStore } from "./closedViewStore";
 import { reopenClosedView } from "./reopenClosedView";
 import {
+  hostRightPanel,
   migratePersistedRightPanelState,
   pullRequestSurface,
   pullRequestSurfaceId,
@@ -39,52 +40,23 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
-  it("keeps an existing side conversation selected while upgrading its saved panel", () => {
-    const child = ThreadId.make("side-child");
-    const restored = migratePersistedRightPanelState({
-      byThreadKey: {
-        "env-1:thread-A": {
-          isOpen: true,
-          activeSurfaceId: "side:side-child",
-          surfaces: [
-            { id: "files", kind: "files" },
-            { id: "side:side-child", kind: "side-conversation", resourceId: child },
-          ],
-        },
-      },
-    });
-    expect(selectActiveRightPanelSurface(restored.byThreadKey, refA)).toEqual({
-      id: "conversation:side-child",
-      kind: "conversation",
-      resourceId: child,
-    });
-    expect(selectThreadRightPanelState(restored.byThreadKey, refA).isOpen).toBe(true);
-  });
-  it("reopens independent side tabs per environment after closing and restoring panel state", () => {
-    const child = ThreadId.make("side-child");
-    const otherEnvironment = scopeThreadRef("env-2" as EnvironmentId, refA.threadId);
+  it("opens a hosted side chat's panel actions in its parent's panel until unhosted", () => {
     const store = useRightPanelStore.getState();
-    store.openConversation(refA, child);
-    store.openConversation(refA, child);
-    store.open(otherEnvironment, "diff");
+    const unhost = hostRightPanel(refB, refA);
+    store.openFile(refB, "src/app.ts");
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)?.id).toBe(
+      "file:src/app.ts",
+    );
     expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
-    ).toEqual([{ id: "conversation:side-child", kind: "conversation", resourceId: child }]);
-    const restored = migratePersistedRightPanelState(useRightPanelStore.getState());
-    expect(selectActiveRightPanelSurface(restored.byThreadKey, refA)?.kind).toBe("conversation");
-    store.closeSurface(refA, "conversation:side-child");
-    expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
-    ).toHaveLength(0);
-    expect(
-      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, otherEnvironment)
-        ?.kind,
-    ).toBe("diff");
-    store.openConversation(refA, child);
-    expect(
-      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
-    ).toMatchObject({ resourceId: child });
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+    ).toEqual([]);
+    unhost();
+    store.openFile(refB, "src/app.ts");
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB)?.id).toBe(
+      "file:src/app.ts",
+    );
   });
+
   it("records single and bulk tab closes, newest first", () => {
     const store = useRightPanelStore.getState();
     const pr = pullRequestSurface({
@@ -796,7 +768,6 @@ describe("rightPanelStore", () => {
       }),
     ]);
 
-    // The workspace root is the files explorer, still holding the way back down.
     store.navigateFolder(refA, "file:apps", "", "apps/web/src");
     expect(state().surfaces.map((surface) => surface.id)).toEqual(["file:README.md", "files"]);
     expect(state().surfaces[1]).toEqual({
@@ -805,7 +776,6 @@ describe("rightPanelStore", () => {
       folderTrail: "apps/web/src",
     });
 
-    // Reaching the end of the trail leaves no trail behind.
     store.navigateFolder(refA, "files", "apps/web/src", "apps/web/src");
     expect(state().activeSurfaceId).toBe("file:apps/web/src");
     expect(state().surfaces[1]).toEqual({
@@ -849,7 +819,6 @@ describe("rightPanelStore", () => {
       expect.objectContaining({ id: "file:src", folderTrail: "src/app.ts" }),
     ]);
 
-    // The trail's end is the file: its tab comes back as it was, the folder tab goes.
     store.navigateFolder(refA, "file:src", "src/app.ts", "src/app.ts");
     expect(state().activeSurfaceId).toBe("file:src/app.ts");
     expect(state().surfaces).toEqual([
@@ -1228,6 +1197,24 @@ describe("rightPanelStore", () => {
       activeSurfaceId: "browser:hidden-tab",
       surfaces: [{ id: "browser:hidden-tab", kind: "preview", resourceId: "hidden-tab" }],
     });
+  });
+
+  it("hides the panel when browser reconciliation removes its last session tab", () => {
+    const store = useRightPanelStore.getState();
+    store.openBrowser(refA, "tab-a");
+    store.reconcileBrowserSurfaces(refA, []);
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: false,
+      activeSurfaceId: null,
+      surfaces: [],
+    });
+
+    store.openBrowser(refA, "tab-b");
+    store.open(refA, "diff");
+    store.reconcileBrowserSurfaces(refA, []);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA),
+    ).toMatchObject({ isOpen: true, activeSurfaceId: "diff" });
   });
 
   it("moves a surface to a new index and keeps it there through browser reconciliation", () => {

@@ -28,6 +28,7 @@ export function ScheduledTaskEditorHost() {
     null;
   // Nothing is connected to create a task on; drop the request rather than
   // have the dialog pop up whenever an environment connects later.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the editor store's request once no environment can take it
   useEffect(() => {
     if (target && environmentId === null) close();
   }, [close, environmentId, target]);

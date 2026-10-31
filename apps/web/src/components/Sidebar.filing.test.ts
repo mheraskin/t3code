@@ -12,6 +12,7 @@ function thread(id: string, parent: string | null = null) {
     projectId,
     archivedAt: null,
     filedUnderThreadId: parent === null ? null : ThreadId.make(parent),
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: ThreadId.make(id) },
   };
 }
 
@@ -36,7 +37,15 @@ describe("sidebar filing", () => {
       thread("parent"),
       thread("nested", "parent"),
       { ...thread("archived"), archivedAt: "2026-10-03T00:00:00Z" },
-      { ...thread("side"), presentation: { kind: "side" as const, ownerThreadId: source.id } },
+      {
+        ...thread("side"),
+        lineage: {
+          parentThreadId: source.id,
+          relationshipToParent: "fork" as const,
+          rootThreadId: source.id,
+          sideChat: true,
+        },
+      },
       { ...thread("foreign"), projectId: ProjectId.make("other") },
     ];
     expect(sidebarFilingCandidates(source, candidates).map((entry) => entry.id)).toEqual([

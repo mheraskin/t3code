@@ -43,8 +43,10 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
     if (!url) throw new Error("Reconnect to the environment and try again.");
     return { _tag: "url", url };
   };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- aborts an in-flight native drag on unmount
   useEffect(() => () => gesture.current?.abort(), []);
   const localFile = source?.kind === "blob" ? source.file : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- holds a blob URL for browser drags until unmount
   useEffect(() => {
     if (!localFile || typeof window === "undefined" || window.desktopBridge?.prepareFileDrag)
       return;

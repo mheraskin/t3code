@@ -1,6 +1,5 @@
 import {
   PREVIEW_GATEWAY_TOKEN_QUERY_PARAM,
-  type BrowserNavigationTarget,
   type EnvironmentId,
   type PreviewOpenGatewayInput,
   type PreviewOpenGatewayResult,
@@ -15,13 +14,6 @@ export type OpenPreviewGateway<E> = (input: {
   readonly environmentId: EnvironmentId;
   readonly input: PreviewOpenGatewayInput;
 }) => Promise<AtomCommandResult<PreviewOpenGatewayResult, E>>;
-
-/** The environment-side URL a navigation target names. */
-export function navigationTargetUrl(target: BrowserNavigationTarget): string {
-  if (target.kind === "url") return target.url;
-  const path = target.path?.startsWith("/") ? target.path : `/${target.path ?? ""}`;
-  return `${target.protocol ?? "http"}://localhost:${target.port}${path}`;
-}
 
 interface PreviewGatewayTarget {
   readonly port: number;

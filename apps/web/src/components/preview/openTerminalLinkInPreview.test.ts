@@ -32,8 +32,6 @@ const browserDefaultsMocks = vi.hoisted(() => ({
 
 vi.mock("~/browser/browserDefaults", () => ({
   resolveBrowserDefaults: browserDefaultsMocks.resolve,
-  browserDefaultOpenViewport: (defaults: { viewport: unknown }) => defaults.viewport,
-  browserDefaultOpenProfileId: (defaults: { profileId: string }) => defaults.profileId,
 }));
 
 const linkTargetMocks = vi.hoisted(() => ({

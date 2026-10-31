@@ -1,23 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - raw sockets are needed to relay WebSocket upgrades
 // @effect-diagnostics globalDate:off - token checks run inside Node request callbacks
-/**
- * Tailscale preview gateway.
- *
- * Dev servers usually bind loopback, so a client on another tailnet device
- * cannot reach them even though discovery lists them. For a discovered port
- * the gateway listens on this machine's Tailscale addresses at the same port
- * number and reverse-proxies HTTP and WebSocket traffic to `localhost:<port>`.
- * Keeping the port number means the client's URL rewrite and any absolute
- * `host:port` URLs the app emits (Vite HMR, redirects) keep working.
- *
- * Access is a signed, port-scoped token minted over the authenticated RPC.
- * The first request trades it for a cookie on the gateway origin. T3's own
- * cookies are host-scoped and therefore reach the gateway too; they are
- * stripped before anything is forwarded to the dev server.
- *
- * Only Tailscale addresses are bound, never the LAN. A listener closes when its
- * upstream refuses a connection so a stopped dev server gets its port back.
- */
+// Loopback dev servers are proxied on this machine's Tailscale addresses at the same port, so
+// HMR and absolute host:port URLs keep working. A port-scoped token becomes a gateway cookie;
+// T3's own cookies are stripped. Only Tailscale addresses bind, never the LAN, and a refused
+// upstream closes its listener so a stopped dev server gets its port back.
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -77,7 +63,7 @@ export const signGatewayToken = (
   return `${payload}.${signPayload(payload, secret)}`;
 };
 
-export const verifyGatewayToken = (
+const verifyGatewayToken = (
   token: string,
   port: number,
   secret: Uint8Array,
@@ -312,7 +298,7 @@ const listen = (server: NodeHttp.Server, port: number, address: string) =>
     });
   });
 
-export const make = Effect.gen(function* PreviewGatewayMake() {
+const make = Effect.gen(function* PreviewGatewayMake() {
   const portDiscovery = yield* PortDiscovery;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const openLock = yield* Semaphore.make(1);
@@ -331,7 +317,7 @@ export const make = Effect.gen(function* PreviewGatewayMake() {
   };
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
-      for (const port of [...listeners.keys()]) closePort(port);
+      for (const port of Array.from(listeners.keys())) closePort(port);
     }),
   );
 

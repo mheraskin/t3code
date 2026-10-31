@@ -1,7 +1,6 @@
 import { type ReactNode, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { observeResize } from "~/lib/observeResize";
-import { useComposerFloatingLayerProps } from "./composerEventScope";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -23,9 +22,9 @@ export function ComposerCommandMenuLayer(props: {
   anchor: HTMLElement | null;
   children: ReactNode;
 }) {
-  const composerFloatingLayerProps = useComposerFloatingLayerProps();
   const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- positions the menu from the composer's DOM rect, tracking window resize, scroll and ancestor resizes
   useLayoutEffect(() => {
     const anchor = props.anchor;
     if (!anchor) return;
@@ -81,7 +80,6 @@ export function ComposerCommandMenuLayer(props: {
   return createPortal(
     <div
       className="pointer-events-auto fixed z-40 flex flex-col"
-      {...composerFloatingLayerProps}
       data-composer-drawer-layer="true"
       style={{
         bottom: position.bottom,
