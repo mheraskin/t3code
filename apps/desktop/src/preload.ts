@@ -205,6 +205,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   saveFile: (input) => ipcRenderer.invoke(IpcChannels.SAVE_FILE_CHANNEL, input),
   prepareFileDrag: (input) => ipcRenderer.invoke(IpcChannels.PREPARE_FILE_DRAG_CHANNEL, input),
   startFileDrag: (id) => ipcRenderer.invoke(IpcChannels.START_FILE_DRAG_CHANNEL, id),
+  readMedia: (url: string) => ipcRenderer.invoke(IpcChannels.READ_MEDIA_CHANNEL, url),
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),
   openSystemSettings: (pane: string) =>

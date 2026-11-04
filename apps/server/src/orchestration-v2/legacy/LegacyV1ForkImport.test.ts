@@ -17,7 +17,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
-import * as ProjectionMaintenance from "../ProjectionMaintenance.ts";
+import * as ProjectionReplay from "../testkit/ProjectionReplay.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as LegacyV1ThreadImporter from "./LegacyV1ThreadImporter.ts";
 
@@ -31,7 +31,7 @@ const TestLayer = Layer.mergeAll(
   stores,
   eventSink,
   LegacyV1ThreadImporter.layer.pipe(Layer.provide(Layer.mergeAll(stores, eventSink))),
-  ProjectionMaintenance.layer.pipe(Layer.provide(stores)),
+  ProjectionReplay.layer.pipe(Layer.provide(stores)),
 );
 
 const source = (sourceThreadId: string, sourceMessageId: string | null = null) => ({
@@ -84,7 +84,7 @@ describe("legacy fork import", () => {
       const sql = yield* SqlClient.SqlClient;
       const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
       const projections = yield* ProjectionStore.ProjectionStoreV2;
-      const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+      const maintenance = yield* ProjectionReplay.ProjectionReplay;
       yield* seed;
       yield* insertThread({ id: "parent" });
       yield* insertThread({ id: "filed-parent" });
@@ -255,7 +255,7 @@ describe("legacy fork import", () => {
         const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
         const projections = yield* ProjectionStore.ProjectionStoreV2;
         const sink = yield* EventSink.EventSinkV2;
-        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+        const maintenance = yield* ProjectionReplay.ProjectionReplay;
         yield* seed;
         yield* insertThread({ id: "parent" });
         yield* insertThread({
