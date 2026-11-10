@@ -37,7 +37,7 @@ describe("DesktopFileTransfer", () => {
   it.effect("streams a remote file into a local temporary file without changing its bytes", () =>
     Effect.gen(function* () {
       const server = yield* Effect.acquireRelease(
-        Effect.tryPromise(
+        Effect.promise(
           () =>
             new Promise<NodeHttp.Server>((resolve, reject) => {
               const server = NodeHttp.createServer((_request, response) => {

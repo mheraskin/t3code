@@ -71,7 +71,10 @@ const make = Effect.gen(function* () {
         yield* fs.writeFile(filePath, input.source.bytes);
       } else {
         const sourceUrl = input.source.url;
-        const url = yield* Effect.try(() => new URL(sourceUrl));
+        const url = yield* Effect.try({
+          try: () => new URL(sourceUrl),
+          catch: () => "Invalid download URL",
+        });
         if (url.protocol !== "http:" && url.protocol !== "https:") {
           return yield* Effect.fail("Invalid download URL");
         }
@@ -86,9 +89,10 @@ const make = Effect.gen(function* () {
       Effect.tapError(() => fs.remove(directory, { recursive: true }).pipe(Effect.ignore)),
       Effect.mapError((cause) => new DesktopFileTransferError({ operation: "prepare", cause })),
     );
-    const icon = yield* Effect.tryPromise(() =>
-      Electron.app.getFileIcon(filePath, { size: "normal" }),
-    ).pipe(
+    const icon = yield* Effect.tryPromise({
+      try: () => Electron.app.getFileIcon(filePath, { size: "normal" }),
+      catch: (cause) => new DesktopFileTransferError({ operation: "prepare", cause }),
+    }).pipe(
       Effect.orElseSucceed(() =>
         Electron.nativeImage
           .createFromDataURL(
@@ -105,14 +109,17 @@ const make = Effect.gen(function* () {
     input: DesktopFileTransferInput,
     senderId: number,
   ) {
-    const result = yield* Effect.tryPromise(() => {
-      const sender = Electron.webContents.fromId(senderId);
-      const owner = sender ? Electron.BrowserWindow.fromWebContents(sender) : null;
-      const options = { defaultPath: input.name.split(/[\\/]/).at(-1) ?? "file" };
-      return owner
-        ? Electron.dialog.showSaveDialog(owner, options)
-        : Electron.dialog.showSaveDialog(options);
-    }).pipe(Effect.mapError((cause) => new DesktopFileTransferError({ operation: "save", cause })));
+    const result = yield* Effect.tryPromise({
+      try: () => {
+        const sender = Electron.webContents.fromId(senderId);
+        const owner = sender ? Electron.BrowserWindow.fromWebContents(sender) : null;
+        const options = { defaultPath: input.name.split(/[\\/]/).at(-1) ?? "file" };
+        return owner
+          ? Electron.dialog.showSaveDialog(owner, options)
+          : Electron.dialog.showSaveDialog(options);
+      },
+      catch: (cause) => new DesktopFileTransferError({ operation: "save", cause }),
+    });
     if (result.canceled || !result.filePath) return false;
     const id = yield* prepare(input, senderId);
     const file = prepared.get(id);

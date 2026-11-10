@@ -4,6 +4,7 @@
 // HMR and absolute host:port URLs keep working. A port-scoped token becomes a gateway cookie;
 // T3's own cookies are stripped. Only Tailscale addresses bind, never the LAN, and a refused
 // upstream closes its listener so a stopped dev server gets its port back.
+import * as NodeCrypto from "node:crypto";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -23,12 +24,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import {
-  base64UrlDecodeUtf8,
-  base64UrlEncode,
-  signPayload,
-  timingSafeEqualBase64Url,
-} from "../auth/utils.ts";
+import { base64UrlDecodeUtf8, base64UrlEncode, timingSafeEqualBase64Url } from "../auth/utils.ts";
 import { PortDiscovery } from "./PortScanner.ts";
 
 export class PreviewGateway extends Context.Service<
@@ -52,6 +48,10 @@ const GatewayClaims = Schema.fromJsonString(
 );
 const decodeClaims = Schema.decodeUnknownOption(GatewayClaims);
 const encodeClaims = Schema.encodeSync(GatewayClaims);
+
+// Synchronous because tokens are checked inside raw Node request and upgrade callbacks.
+const signPayload = (payload: string, secret: Uint8Array): string =>
+  NodeCrypto.createHmac("sha256", secret).update(payload).digest("base64url");
 
 export const gatewayCookieName = (port: number): string => `t3_preview_gateway_${port}`;
 
