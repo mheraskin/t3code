@@ -31,7 +31,7 @@ function Probe() {
 it("never starts a delayed native drag after release, and reuses the prepared file for the next drag", async () => {
   using _bridge = stubGlobal("desktopBridge", {
     prepareFileDrag: mocks.prepare,
-    startFileDrag: mocks.start,
+    startPreparedFileDrag: mocks.start,
   });
   mocks.start.mockResolvedValue(undefined);
   let complete: (id: string) => void = () => {};

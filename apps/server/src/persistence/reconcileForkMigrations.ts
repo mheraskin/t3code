@@ -22,6 +22,20 @@ export const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(func
   throughId?: number,
 ) {
   const sql = yield* SqlClient.SqlClient;
+  // Checked before the transaction so a database with nothing to reconcile takes no write lock.
+  const ledger = yield* sql<{ readonly name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (ledger.length === 0) return [];
+  const forkRows = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+    SELECT migration_id, name FROM effect_sql_migrations
+  `;
+  if (
+    !replacements.some((replacement) =>
+      forkRows.some((row) => row.migration_id === replacement[0] && row.name === replacement[1]),
+    )
+  )
+    return [];
   return yield* sql.withTransaction(
     Effect.gen(function* () {
       const tables = yield* sql<{ readonly name: string }>`
@@ -166,6 +180,13 @@ export const migrateForkSideConversations = Effect.fn("migrateForkSideConversati
     WHERE type = 'table' AND name = 'orchestration_v2_projection_threads'
   `;
   if (tables.length === 0) return;
+  // A no-op startup must not write: CLI startup can run against a read-only connection.
+  const marked = yield* sql`
+    SELECT 1 FROM orchestration_v2_projection_threads
+    WHERE json_type(payload_json, '$.presentation') IS NOT NULL
+    LIMIT 1
+  `;
+  if (marked.length === 0) return;
   yield* sql`
     UPDATE orchestration_v2_projection_threads
     SET payload_json = json_remove(

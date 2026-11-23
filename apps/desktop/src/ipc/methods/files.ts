@@ -25,8 +25,8 @@ export const saveFile = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const startFileDrag = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.START_FILE_DRAG_CHANNEL,
+export const startPreparedFileDrag = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.START_PREPARED_FILE_DRAG_CHANNEL,
   payload: Schema.String,
   result: Schema.Void,
   handler: Effect.fn("desktop.ipc.files.startDrag")(function* (id, event) {

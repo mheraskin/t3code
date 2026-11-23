@@ -1,6 +1,8 @@
 import type { AssetResource, DesktopFileSource, EnvironmentId } from "@t3tools/contracts";
+import { msg } from "gt-react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useAssetUrlRefresh } from "~/assets/assetUrls";
+import { m } from "~/i18n/messages";
 import { readLocalApi } from "~/localApi";
 import { toastManager } from "~/components/ui/toast";
 import { saveFileOnDevice } from "./fileTransfer";
@@ -40,7 +42,7 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
       return { _tag: "bytes", bytes: new Uint8Array(await source.file.arrayBuffer()) };
     }
     const url = await refresh();
-    if (!url) throw new Error("Reconnect to the environment and try again.");
+    if (!url) throw new Error(m(msg("Reconnect to the environment and try again.")));
     return { _tag: "url", url };
   };
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- aborts an in-flight native drag on unmount
@@ -59,7 +61,7 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
     toastManager.add({
       type: "error",
       title,
-      description: cause instanceof Error ? cause.message : "Please try again.",
+      description: cause instanceof Error ? cause.message : m(msg("Please try again.")),
     });
   };
 
@@ -67,7 +69,7 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
     if (!source || saving) return;
     setSaving(true);
     await saveFileOnDevice(name, read).catch((cause: unknown) =>
-      reportFailure("Could not save file", cause),
+      reportFailure(m(msg("Could not save file")), cause),
     );
     setSaving(false);
   };
@@ -99,8 +101,8 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
     event.stopPropagation();
     const bridge = window.desktopBridge;
     const prepareFileDrag = bridge?.prepareFileDrag;
-    const startFileDrag = bridge?.startFileDrag;
-    if (prepareFileDrag && startFileDrag) {
+    const startPreparedFileDrag = bridge?.startPreparedFileDrag;
+    if (prepareFileDrag && startPreparedFileDrag) {
       event.preventDefault();
       const controller = gesture.current;
       if (!controller || controller.signal.aborted) return;
@@ -112,24 +114,24 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
         };
         prepared.current = preparation;
       }
-      const toast = toastManager.add({ type: "loading", title: "Preparing file to drag…" });
+      const toast = toastManager.add({ type: "loading", title: m(msg("Preparing file to drag…")) });
       void preparation.promise
         .then(async (id) => {
           if (controller.signal.aborted) {
             toastManager.update(toast, {
               type: "info",
-              title: "File is ready. Drag it again to copy it.",
+              title: m(msg("File is ready. Drag it again to copy it.")),
             });
             return;
           }
           prepared.current = null;
-          await startFileDrag(id);
+          await startPreparedFileDrag(id);
           toastManager.close(toast);
         })
         .catch((cause: unknown) => {
           prepared.current = null;
           toastManager.close(toast);
-          reportFailure("Could not drag file", cause);
+          reportFailure(m(msg("Could not drag file")), cause);
         });
       return;
     }
@@ -143,7 +145,10 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
       );
     } else {
       event.preventDefault();
-      toastManager.add({ type: "info", title: "Use Download to save this file on your device." });
+      toastManager.add({
+        type: "info",
+        title: m(msg("Use Download to save this file on your device.")),
+      });
     }
   };
 
@@ -163,11 +168,14 @@ export function useFileTransfer(name: string, source: FileTransferSource | null)
         ? { x: bounds.left, y: bounds.bottom }
         : { x: event.clientX, y: event.clientY };
     void readLocalApi()
-      ?.contextMenu.show([{ id: "download", label: "Download…", icon: "download" }], position)
+      ?.contextMenu.show(
+        [{ id: "download", label: m(msg("Download…")), icon: "download" }],
+        position,
+      )
       .then((action) => {
         if (action === "download") void save();
       })
-      .catch((cause: unknown) => reportFailure("Could not open file menu", cause));
+      .catch((cause: unknown) => reportFailure(m(msg("Could not open file menu")), cause));
   };
 
   return {

@@ -2,6 +2,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { buildFileContextMenuItems, resolveFileContextMenuAbsolutePath } from "./fileContextMenu";
+import { m } from "./i18n/messages";
 
 const BASE_TARGET = {
   environmentId: EnvironmentId.make("environment-local"),
@@ -54,6 +55,7 @@ describe("buildFileContextMenuItems", () => {
           canOpenDefault: false,
           editorIds: [],
         },
+        resolve: m,
       }),
     ).toEqual([{ id: "download", label: "Download…", icon: "download" }]);
   });

@@ -1,7 +1,8 @@
 // Header controls share the titlebar row; search replaces the row until its query clears.
 // The scope picker is passed in because its state lives with the sidebar's scope logic, and
 // `anchorRef` sits on the button group so the popup anchors there, not on the 28px trigger.
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { useGT } from "gt-react";
+import { SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -23,7 +24,6 @@ export interface SidebarThreadHeaderActionsProps {
   /** The project scope combobox, rendered after search. */
   projectScope: ReactNode;
   onOpenSearch: () => void;
-  onNewProject: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
   newThreadShortcutLabel: string | null | undefined;
@@ -36,39 +36,35 @@ export function SidebarThreadHeaderActions({
   hasProjects,
   projectScope,
   onOpenSearch,
-  onNewProject,
   onNewThread,
   newThreadDisabled,
   newThreadShortcutLabel,
   newThreadInProjectShortcutLabel,
   showNewThreadInProjectHint,
 }: SidebarThreadHeaderActionsProps) {
+  const gt = useGT();
   const newThreadLabel = newThreadShortcutLabel
-    ? `New thread (${newThreadShortcutLabel})`
-    : "New thread";
+    ? gt("New thread ({shortcut})", { shortcut: newThreadShortcutLabel })
+    : gt("New thread");
 
   return (
     <div ref={anchorRef} className="flex shrink-0 items-center">
-      <SidebarHeaderIconButton label="Search threads" onClick={onOpenSearch}>
+      <SidebarHeaderIconButton label={gt("Search threads")} onClick={onOpenSearch}>
         <SearchIcon />
       </SidebarHeaderIconButton>
-      {hasProjects ? (
-        <>
-          {projectScope}
-          <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
-            <FolderPlusIcon />
-          </SidebarHeaderIconButton>
-        </>
-      ) : null}
+      {hasProjects ? projectScope : null}
       <SidebarHeaderIconButton
-        label="New thread"
+        label={gt("New thread")}
         tooltip={
           showNewThreadInProjectHint ? (
             <span className="flex flex-col gap-0.5">
               <span>{newThreadLabel}</span>
               <span className="text-muted-foreground">
-                New thread in current project: Shift+click
-                {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+                {newThreadInProjectShortcutLabel
+                  ? gt("New thread in current project: Shift+click ({shortcut})", {
+                      shortcut: newThreadInProjectShortcutLabel,
+                    })
+                  : gt("New thread in current project: Shift+click")}
               </span>
             </span>
           ) : (
@@ -106,6 +102,7 @@ export function SidebarThreadSearchBar({
   activeSearchResultIndex,
   onClose,
 }: SidebarThreadSearchBarProps) {
+  const gt = useGT();
   const resultsVisible = isSearching && searchResultCount > 0;
   // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
@@ -125,8 +122,8 @@ export function SidebarThreadSearchBar({
         onBlur={() => {
           if (searchQuery.length === 0) onClose();
         }}
-        placeholder="Search threads"
-        aria-label="Search threads"
+        placeholder={gt("Search threads")}
+        aria-label={gt("Search threads")}
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={resultsVisible}
@@ -141,7 +138,7 @@ export function SidebarThreadSearchBar({
         size="icon-micro"
         variant="ghost-muted"
         className="shrink-0"
-        aria-label="Close thread search"
+        aria-label={gt("Close thread search")}
         // Keep focus on the input so its blur does not close first.
         onPointerDown={(event) => event.preventDefault()}
         onClick={onClose}

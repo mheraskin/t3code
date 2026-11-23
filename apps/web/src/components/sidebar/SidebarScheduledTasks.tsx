@@ -19,10 +19,13 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
 import type { EnvironmentId, ScheduledTask } from "@t3tools/contracts";
+import type { TimestampFormat } from "@t3tools/contracts/settings";
+import { msg, T, Var } from "gt-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
-import { requestConfirmDialog } from "../../confirmDialog";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { m } from "../../i18n/messages";
+import { useClientSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useScheduledTaskEditorStore } from "../../scheduledTaskEditorStore";
 import { useConnectedEnvironmentIds } from "../../state/environments";
@@ -30,9 +33,9 @@ import { serverEnvironment } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
   ScheduledRelativeLabel,
-  scheduleLabel,
   useScheduledTaskActions,
 } from "../settings/ScheduledTasksSettings";
+import { scheduleLabel } from "../settings/scheduledTasksSettings.logic";
 import { Button } from "../ui/button";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -77,7 +80,7 @@ export function SidebarScheduledTasks() {
   if (tasks.length === 0) return null;
   const failedCount = tasks.filter(({ task }) => task.lastRunStatus === "failed").length;
   return (
-    <section aria-label="Scheduled tasks" className="mx-0.5 mb-1">
+    <section aria-label={m(msg("Scheduled tasks"))} className="mx-0.5 mb-1">
       <div className="flex items-center gap-0.5">
         <CollapsibleSectionHeader
           expanded={expanded}
@@ -86,13 +89,17 @@ export function SidebarScheduledTasks() {
           accessory={
             <>
               {failedCount > 0 ? (
-                <SectionHeaderStatus>{failedCount} failed</SectionHeaderStatus>
+                <SectionHeaderStatus>
+                  <T>
+                    <Var>{failedCount}</Var> failed
+                  </T>
+                </SectionHeaderStatus>
               ) : null}
               <span className="shrink-0 tabular-nums">{tasks.length}</span>
             </>
           }
         >
-          Scheduled
+          <T>Scheduled</T>
         </CollapsibleSectionHeader>
         <Tooltip>
           <TooltipTrigger
@@ -102,14 +109,16 @@ export function SidebarScheduledTasks() {
                 size="icon-xs"
                 variant="ghost-muted"
                 className="shrink-0"
-                aria-label="New scheduled task"
+                aria-label={m(msg("New scheduled task"))}
                 onClick={() => openNew()}
               />
             }
           >
             <PlusIcon className="size-3.5" />
           </TooltipTrigger>
-          <TooltipPopup side="top">New scheduled task</TooltipPopup>
+          <TooltipPopup side="top">
+            <T>New scheduled task</T>
+          </TooltipPopup>
         </Tooltip>
       </div>
       {expanded ? <ScheduledTaskList tasks={tasks} /> : null}
@@ -141,15 +150,10 @@ function ScheduledTaskRow({
   const navigate = useNavigate();
   const openEdit = useScheduledTaskEditorStore((state) => state.openEdit);
   const { busy, canOperate, act } = useScheduledTaskActions(environmentId, task);
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const [menuOpen, setMenuOpen] = useState(false);
   const isWebhook = task.schedule.type === "webhook";
   const threadId = task.threadId;
-  const deleteTask = async () => {
-    const message = `Delete "${task.title}"?`;
-    const confirmed =
-      (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
-    if (confirmed) await act("delete");
-  };
   return (
     <li
       className="group/task flex items-center"
@@ -183,7 +187,7 @@ function ScheduledTaskRow({
             {task.title}
           </span>
           <span className="block truncate text-2xs text-sidebar-muted-foreground">
-            {taskStatusLabel(task)}
+            {taskStatusLabel(task, timestampFormat)}
           </span>
         </span>
       </SidebarMenuButton>
@@ -201,7 +205,7 @@ function ScheduledTaskRow({
                 type="button"
                 size="icon-xs"
                 variant="ghost-muted"
-                aria-label={`Actions for ${task.title}`}
+                aria-label={m(msg("Actions for {title}", { title: task.title }))}
               />
             }
           >
@@ -211,7 +215,7 @@ function ScheduledTaskRow({
         <MenuPopup align="end">
           <MenuItem onClick={() => openEdit(environmentId, task)}>
             <PencilIcon />
-            Edit
+            <T>Edit</T>
           </MenuItem>
           {threadId ? (
             <MenuItem
@@ -223,23 +227,23 @@ function ScheduledTaskRow({
               }
             >
               <MessageSquareIcon />
-              Open thread
+              <T>Open thread</T>
             </MenuItem>
           ) : null}
           {isWebhook ? null : (
             <MenuItem disabled={busy || !canOperate} onClick={() => void act("run")}>
               <PlayIcon />
-              Run now
+              <T>Run now</T>
             </MenuItem>
           )}
           <MenuItem disabled={busy || !canOperate} onClick={() => void act("toggle")}>
             {task.enabled ? <PauseIcon /> : <PlayIcon />}
-            {task.enabled ? "Pause" : "Resume"}
+            {task.enabled ? <T>Pause</T> : <T>Resume</T>}
           </MenuItem>
           <MenuSeparator />
-          <MenuItem disabled={busy || !canOperate} onClick={() => void deleteTask()}>
+          <MenuItem disabled={busy || !canOperate} onClick={() => void act("delete")}>
             <Trash2Icon />
-            Delete
+            <T>Delete</T>
           </MenuItem>
         </MenuPopup>
       </Menu>
@@ -247,15 +251,17 @@ function ScheduledTaskRow({
   );
 }
 
-function taskStatusLabel(task: ScheduledTask): ReactNode {
-  const schedule = scheduleLabel(task.schedule);
-  if (!task.enabled) return `${schedule} · paused`;
-  if (task.lastRunStatus === "running") return `${schedule} · running`;
-  if (task.lastRunStatus === "failed") return `${schedule} · last run failed`;
+function taskStatusLabel(task: ScheduledTask, timestampFormat: TimestampFormat): ReactNode {
+  const schedule = scheduleLabel(task.schedule, timestampFormat);
+  if (!task.enabled) return m(msg("{schedule} · paused", { schedule }));
+  if (task.lastRunStatus === "running") return m(msg("{schedule} · running", { schedule }));
+  if (task.lastRunStatus === "failed") return m(msg("{schedule} · last run failed", { schedule }));
   if (task.schedule.type === "webhook" || task.nextRunAt === null) return schedule;
   return (
     <>
-      {schedule} · next <ScheduledRelativeLabel value={task.nextRunAt} />
+      <T>
+        <Var>{schedule}</Var> · next <ScheduledRelativeLabel value={task.nextRunAt} />
+      </T>
     </>
   );
 }
