@@ -261,7 +261,10 @@ const layerService = (input: {
 }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
-    Layer.provideMerge(ServerSettings.layerTest(input.settings ?? {})),
+    // Remote fetches are opt-in; these tests exercise the opted-in path unless they pass settings.
+    Layer.provideMerge(
+      ServerSettings.layerTest(input.settings ?? { enableProviderUpdateChecks: true }),
+    ),
     Layer.provideMerge(layerHttpClient(input.response)),
   );
 
@@ -405,7 +408,7 @@ describe("ModelManifest service", () => {
     ),
   );
 
-  it.effect("does not fetch when provider update checks are disabled", () =>
+  it.effect("does not fetch unless provider update checks are turned on", () =>
     Effect.gen(function* () {
       let fetchCount = 0;
       const service = yield* ModelManifest.make.pipe(
@@ -425,7 +428,7 @@ describe("ModelManifest service", () => {
         layerService({
           prefix: "model-manifest-optout-test",
           response: () => Response.json(REMOTE_MANIFEST),
-          settings: { enableProviderUpdateChecks: false },
+          settings: {},
         }),
       ),
     ),

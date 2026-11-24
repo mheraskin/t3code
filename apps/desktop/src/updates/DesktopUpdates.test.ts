@@ -270,8 +270,22 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("checks shortly after startup and then every four hours", () => {
+  it.effect("does not check for updates in the background by default", () => {
     const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        yield* TestClock.adjust("5 hours");
+        assert.equal(harness.checkCount(), 0);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("with background checks enabled, checks after startup and every four hours", () => {
+    const harness = makeHarness({ env: { T3CODE_ENABLE_AUTO_UPDATE_CHECKS: "true" } });
 
     return Effect.scoped(
       Effect.gen(function* () {

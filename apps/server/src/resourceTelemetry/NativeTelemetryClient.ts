@@ -319,6 +319,29 @@ const decodeMonitorEvent: (
 ) => Effect.Effect<ResourceMonitorEvent, Schema.SchemaError> = Schema.decodeUnknownEffect(
   ResourceMonitorEventSchema,
 );
+// Command lines can carry secrets. An older sidecar binary may still send them, so keep only
+// the executable name before anything reaches live telemetry or history.
+const withoutCommandLines = <P extends { readonly name: string; readonly command: string }>(
+  processes: ReadonlyArray<P>,
+): Array<P> => processes.map((process) => ({ ...process, command: process.name }));
+
+export function stripCommandLines(event: ResourceMonitorEvent): ResourceMonitorEvent {
+  switch (event.type) {
+    case "snapshot":
+      return { ...event, processes: withoutCommandLines(event.processes) };
+    case "historyChunk":
+      return {
+        ...event,
+        snapshots: event.snapshots.map((snapshot) => ({
+          ...snapshot,
+          processes: withoutCommandLines(snapshot.processes),
+        })),
+      };
+    default:
+      return event;
+  }
+}
+
 const encodeMonitorCommand = Schema.encodeEffect(
   Schema.fromJsonString(ResourceMonitorCommandSchema),
 );
@@ -618,6 +641,7 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
               );
             }
             return decodeMonitorEvent(value).pipe(
+              Effect.map(stripCommandLines),
               Effect.mapError((cause) => new NativeTelemetryDecodeFailed({ cause })),
             );
           },

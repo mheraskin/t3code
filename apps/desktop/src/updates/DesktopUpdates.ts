@@ -1363,7 +1363,7 @@ export const make = Effect.gen(function* () {
         runEffect(handleUpdateDownloaded(info));
       });
 
-      yield* startUpdatePollers;
+      if (config.enableAutoUpdateChecks) yield* startUpdatePollers;
     }).pipe(Effect.withSpan("desktop.updates.configure")),
     setChannel: Effect.fn("desktop.updates.setChannel")(function* (
       nextChannel: DesktopUpdateChannel,

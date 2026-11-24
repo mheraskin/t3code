@@ -202,7 +202,7 @@ the machine instead.
 The same page lets you refresh provider status and update supported providers.
 These controls require a connected environment and permission to operate it.
 Provider update checks and restart continuation preferences are in
-**Settings → Maintenance**. If provider update checks are disabled, enable them
+**Settings → Maintenance**. Provider update checks are off by default; enable them
 there before refreshing to find newer versions. The same setting controls whether
 T3 Code downloads model catalog updates, so with it off new models may not appear
 until you enable it and refresh provider status.

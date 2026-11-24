@@ -4,9 +4,7 @@ use std::io::{self, BufRead, BufWriter, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use sysinfo::{
-    MINIMUM_CPU_UPDATE_INTERVAL, Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind,
-};
+use sysinfo::{MINIMUM_CPU_UPDATE_INTERVAL, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 const PROTOCOL_VERSION: u32 = 3;
 const MIN_SAMPLE_INTERVAL_MS: u64 = 250;
@@ -18,7 +16,6 @@ const INPUT_QUEUE_CAPACITY: usize = 64;
 const MAX_HISTORY_RETAINED_ENTRIES: usize = 20_000;
 const MAX_HISTORY_RETAINED_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PROCESS_NAME_BYTES: usize = 1_024;
-const MAX_PROCESS_COMMAND_BYTES: usize = 16 * 1_024;
 const MAX_PROCESS_STATUS_BYTES: usize = 256;
 const HISTORY_CHUNK_SNAPSHOTS: usize = 32;
 const TWO_STAGE_PROCESS_REFRESH: bool = cfg!(any(target_os = "linux", target_os = "macos"));
@@ -527,16 +524,8 @@ impl Collector {
                     return None;
                 }
                 let disk_usage = details.disk_usage();
-                let command = if details.cmd().is_empty() {
-                    process.name().to_string_lossy().into_owned()
-                } else {
-                    details
-                        .cmd()
-                        .iter()
-                        .map(|part| part.to_string_lossy())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                };
+                // Arguments can carry secrets, so only the executable name is reported.
+                let command = process.name().to_string_lossy().into_owned();
 
                 Some(ProcessSample {
                     pid,
@@ -547,7 +536,7 @@ impl Collector {
                         process.name().to_string_lossy().into_owned(),
                         MAX_PROCESS_NAME_BYTES,
                     ),
-                    command: truncate_utf8(command, MAX_PROCESS_COMMAND_BYTES),
+                    command: truncate_utf8(command, MAX_PROCESS_NAME_BYTES),
                     status: truncate_utf8(
                         format!("{:?}", process.status()),
                         MAX_PROCESS_STATUS_BYTES,
@@ -599,7 +588,6 @@ fn process_refresh_kind() -> ProcessRefreshKind {
         .with_memory()
         .with_cpu()
         .with_disk_usage()
-        .with_cmd(UpdateKind::Always)
         .without_tasks()
 }
 
@@ -1008,6 +996,7 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sysinfo::UpdateKind;
 
     #[test]
     fn selects_roots_and_all_descendants() {
@@ -1458,10 +1447,10 @@ mod tests {
     }
 
     #[test]
-    fn refreshes_commands_without_enumerating_linux_tasks() {
+    fn never_reads_command_lines_or_enumerates_linux_tasks() {
         let refresh_kind = process_refresh_kind();
 
-        assert_eq!(refresh_kind.cmd(), UpdateKind::Always);
+        assert_eq!(refresh_kind.cmd(), UpdateKind::Never);
         assert!(!refresh_kind.tasks());
         assert!(refresh_kind.cpu());
         assert!(refresh_kind.memory());

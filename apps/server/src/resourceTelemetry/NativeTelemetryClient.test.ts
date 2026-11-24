@@ -9,6 +9,7 @@ import * as Semaphore from "effect/Semaphore";
 
 import {
   commitCollectionControlUpdate,
+  stripCommandLines,
   synchronizeCollectionControlOnStart,
 } from "./NativeTelemetryClient.ts";
 
@@ -137,4 +138,52 @@ describe("commitCollectionControlUpdate", () => {
       expect(yield* Ref.get(applied)).toEqual(yield* Ref.get(desired));
     }),
   );
+});
+
+describe("stripCommandLines", () => {
+  const process = {
+    pid: 42,
+    ppid: 1,
+    startTimeMs: 1_000,
+    runTimeMs: 5_000,
+    name: "node",
+    command: "node cli.js --api-key sk-secret",
+    status: "Run",
+    cpuPercent: 1,
+    cpuTimeMs: 10,
+    residentBytes: 1_024,
+    virtualBytes: 2_048,
+    ioReadBytes: 0,
+    ioWriteBytes: 0,
+    ioSemantics: "storage" as const,
+  };
+  const snapshot = {
+    version: 3 as const,
+    type: "snapshot" as const,
+    sequence: 1,
+    sampledAtUnixMs: 1_000,
+    collectionDurationMicros: 10,
+    scannedProcessCount: 1,
+    retainedProcessCount: 1,
+    inaccessibleProcessCount: 0,
+    externalProcesses: [],
+    processes: [process],
+  };
+
+  it("keeps only the executable name from live snapshots and history", () => {
+    const live = stripCommandLines(snapshot);
+    const history = stripCommandLines({
+      version: 3 as const,
+      type: "historyChunk",
+      requestId: "history-1",
+      done: true,
+      snapshots: [snapshot],
+    });
+
+    expect(live.type === "snapshot" && live.processes[0]?.command).toBe("node");
+    expect(history.type === "historyChunk" && history.snapshots[0]?.processes[0]?.command).toBe(
+      "node",
+    );
+    expect(JSON.stringify([live, history])).not.toContain("sk-secret");
+  });
 });

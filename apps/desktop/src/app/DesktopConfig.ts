@@ -58,6 +58,8 @@ export const DesktopConfig = Config.all({
   desktopLauncherPath: trimmedString("T3CODE_DESKTOP_LAUNCHER_PATH"),
   appImagePath: trimmedString("APPIMAGE"),
   disableAutoUpdate: optionalBoolean("T3CODE_DISABLE_AUTO_UPDATE"),
+  /** Background update checks are opt-in; "Check for updates" works either way. */
+  enableAutoUpdateChecks: optionalBoolean("T3CODE_ENABLE_AUTO_UPDATE_CHECKS"),
   mockUpdates: optionalBoolean("T3CODE_DESKTOP_MOCK_UPDATES"),
   mockUpdateServerPort: Config.Port("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
     Config.withDefault(3000),
