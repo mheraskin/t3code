@@ -75,13 +75,18 @@ const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
   const nodePath = yield* HostProcess.ExecutablePath;
   const baseEnv = yield* HostProcess.Environment;
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-antigravity-driver-" });
-  const instanceId = ProviderInstanceId.make(path.basename(root));
+  // Google sign-in runs only on the default instance, so every harness shares its profile.
+  const instanceId = ProviderInstanceId.make("antigravity");
   const mockAgentPath = yield* path.fromFileUrl(
     new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
   );
   const requestLog = path.join(root, "requests.jsonl");
   const directories = yield* resolveAntigravityInstanceDirectories(config.stateDir, instanceId);
   const profileDirectory = directories.profile;
+  yield* fs.remove(profileDirectory, { recursive: true, force: true });
+  yield* Effect.addFinalizer(() =>
+    fs.remove(profileDirectory, { recursive: true, force: true }).pipe(Effect.ignore),
+  );
   const instancePath = `${path.join(root, "instance-bin")}:${baseEnv.PATH ?? ""}`;
 
   const agentExecutables = new Set<string>();
@@ -328,7 +333,7 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
         expect(snapshot.models[0]?.aliases).toContain(ANTIGRAVITY_DEFAULT_MODEL);
         expect(snapshot.models.every((model) => model.isLegacy !== true)).toBe(true);
         expect(snapshot.slashCommands.map((command) => command.name)).toEqual(["plan", "logout"]);
-        expect(snapshot.supportsTextGeneration).toBe(true);
+        expect(snapshot.supportsTextGeneration).toBe(false);
         h.controls.selected = h.second;
         yield* h.refresh();
 
@@ -408,8 +413,7 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
             .filter((request) => request.method === "initialize")
             .map((request) => request.params?.clientCapabilities),
         ).toEqual([
-          // Two model refreshes, then thread title generation.
-          helper,
+          // Two model refreshes; thread title generation no longer starts a hidden helper.
           helper,
           helper,
           {

@@ -26,6 +26,7 @@ import {
   ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE,
   type AntigravityAuthConfig,
   type AntigravityProfile,
+  antigravityAuthConfigIssue,
   buildAntigravityAcpSpawnInput,
   isAntigravitySignInRequiredError,
   makeAntigravityStderrHandler,
@@ -99,7 +100,6 @@ describe("Antigravity process environment", () => {
         HOME: "/home/developer",
         PATH: "/usr/bin",
         CUSTOM_SETTING: "keep-this",
-        SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0",
         GEMINI_HOME: profile.geminiHome,
         AGY_ACP_FORCE_FILE_STORAGE: "1",
         AGY_CLI_DISABLE_AUTO_UPDATE: "1",
@@ -150,12 +150,36 @@ describe("Antigravity process environment", () => {
     expect(business.GEMINI_API_KEY).toBeUndefined();
     expect(business.GOOGLE_API_KEY).toBeUndefined();
 
-    // Only the Google account method has the `--login` sign-in that works without the keyring.
-    for (const env of [geminiKey, vertexKey, business]) expect(env.SSH_CONNECTION).toBeUndefined();
+    // T3 never pretends to be an SSH session to steer where the CLI stores sign-ins.
+    const personal = spawnFor({
+      authMethod: "oauth-personal",
+      apiKey: "",
+      gcpProject: "",
+      gcpLocation: "",
+    });
+    for (const env of [geminiKey, vertexKey, business, personal]) {
+      expect(env.SSH_CONNECTION).toBeUndefined();
+    }
+  });
+
+  it("refuses Google sign-in on additional instances, which would share the default's account", () => {
+    const google: AntigravityAuthConfig = {
+      authMethod: "oauth-personal",
+      apiKey: "",
+      gcpProject: "",
+      gcpLocation: "",
+    };
+    const apiKey: AntigravityAuthConfig = { ...google, authMethod: "gemini-api-key", apiKey: "k" };
+    const second = ProviderInstanceId.make("antigravity-work");
+    expect(antigravityAuthConfigIssue(google, ProviderInstanceId.make("antigravity"))).toBeNull();
+    expect(antigravityAuthConfigIssue(google, second)).toMatch(/cannot use Google sign-in/);
     expect(
-      spawnFor({ authMethod: "oauth-personal", apiKey: "", gcpProject: "", gcpLocation: "" })
-        .SSH_CONNECTION,
-    ).toBe("127.0.0.1 0 127.0.0.1 0");
+      antigravityAuthConfigIssue(
+        { ...google, authMethod: "oauth-business", gcpProject: "p", gcpLocation: "l" },
+        second,
+      ),
+    ).toMatch(/cannot use Google sign-in/);
+    expect(antigravityAuthConfigIssue(apiKey, second)).toBeNull();
   });
 
   it("isolates TEMP and TMP to the profile directory on Windows", () => {

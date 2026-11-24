@@ -1,7 +1,12 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off - Effect's symlink has no type argument, and Windows needs a junction to link without elevation.
 import * as NodeFSP from "node:fs/promises";
 
-import type { AntigravityAuthMethod, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  defaultInstanceIdForDriver,
+  ProviderDriverKind,
+  type AntigravityAuthMethod,
+  type ProviderInstanceId,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 import * as Digest from "effect/crypto/Digest";
@@ -122,7 +127,19 @@ export function antigravityAuthLabel(authMethod: AntigravityAuthMethod): string 
   }
 }
 
-export function antigravityAuthConfigIssue(auth: AntigravityAuthConfig): string | null {
+export function antigravityAuthConfigIssue(
+  auth: AntigravityAuthConfig,
+  instanceId?: ProviderInstanceId,
+): string | null {
+  // The 1.5 CLI keeps Google sign-ins in one OS keyring entry shared by every profile, so a
+  // second instance would silently run as the default instance's account.
+  if (
+    instanceId !== undefined &&
+    instanceId !== defaultInstanceIdForDriver(ProviderDriverKind.make("antigravity")) &&
+    antigravityAuthUsesBrowser(auth.authMethod)
+  ) {
+    return "Additional Antigravity instances cannot use Google sign-in, because Antigravity shares one sign-in across instances. Use an API key, or the default Antigravity instance.";
+  }
   switch (auth.authMethod) {
     case "oauth-personal":
       return null;
@@ -226,11 +243,6 @@ function antigravityEnvironment(
     baseEnv.SSL_CERT_FILE === undefined &&
     baseEnv.SSL_CERT_DIR === undefined
       ? { SSL_CERT_FILE: profile.caBundlePath }
-      : {}),
-    // The 1.5 CLI ignores AGY_ACP_FORCE_FILE_STORAGE and keeps Google sign-ins in one OS keyring
-    // entry for every profile, unless it believes it runs over SSH. Sign-in then uses `--login`.
-    ...(auth.authMethod === "oauth-personal"
-      ? { SSH_CONNECTION: baseEnv.SSH_CONNECTION || "127.0.0.1 0 127.0.0.1 0" }
       : {}),
     GEMINI_HOME: profile.geminiHome,
     AGY_ACP_FORCE_FILE_STORAGE: "1",

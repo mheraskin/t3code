@@ -5966,6 +5966,68 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     );
   });
 
+  it.effect("surfaces an Auto-mode classifier escalation as a pending approval", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...CLAUDE_TEST_RUNTIME_POLICY,
+        runtimeMode: "auto",
+      });
+      const input = makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now: yield* DateTime.now,
+        attemptId: RunAttemptId.make("attempt-claude-auto-escalation"),
+        text: "Push the branch.",
+        attachments: [],
+        runtimePolicy,
+      });
+      yield* harness.runtime.startTurn({
+        ...input,
+        appThread: { ...input.appThread, runtimeMode: "auto" },
+      });
+      assert.equal(harness.getOpenedOptions()?.permissionMode, "auto");
+      const canUseTool = harness.getOpenedOptions()?.canUseTool;
+      assert.isDefined(canUseTool);
+      const decision = yield* Effect.promise(() =>
+        canUseTool!(
+          "Bash",
+          { command: "git push --force" },
+          {
+            signal: new AbortController().signal,
+            toolUseID: "tool-auto-escalation",
+            requestId: "request-auto-escalation",
+            decisionReason: "Force push rewrites remote history",
+          },
+        ),
+      ).pipe(Effect.forkScoped);
+      const first = yield* Effect.raceFirst(
+        Queue.take(harness.runtimeRequestReceipts).pipe(
+          Effect.map((event) => ({ type: "request", event }) as const),
+        ),
+        Fiber.join(decision).pipe(Effect.map((result) => ({ type: "decision", result }) as const)),
+      );
+      assert.equal(first.type, "request", "Auto mode answered the escalation without the user");
+      if (first.type !== "request") return;
+      const request = first.event.runtimeRequest;
+      assert.equal(request.status, "pending");
+      assert.equal(request.kind, "command");
+      yield* harness.runtime.respondToRuntimeRequest({ requestId: request.id, decision: "decline" });
+      const result = yield* Fiber.join(decision);
+      assert.equal(result?.behavior, "deny");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect(
     "carries earlier user-only skill instructions on sends and steering with attachments",
     () =>

@@ -5,6 +5,7 @@ import {
   ProviderSetupError,
   RuntimeMode,
   settingsSecretLiteral,
+  TextGenerationError,
 } from "@t3tools/contracts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -31,14 +32,9 @@ import { HttpClient } from "effect/http";
 import * as AcpErrors from "effect-acp/errors";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import {
-  isAntigravityTextGenerationAvailable,
-  makeAntigravityTextGeneration,
-} from "../../textGeneration/AntigravityTextGeneration.ts";
 import { makeAntigravityAuth, type AntigravityAuth } from "../AntigravityAuth.ts";
 import * as AntigravityInstallation from "../AntigravityInstallation.ts";
 import { brokenRuntimeError } from "../providerCompatibility.ts";
-import * as AntigravityUsage from "./AntigravityUsage.ts";
 import {
   antigravityAuthConfigIssue,
   antigravityAuthLabel,
@@ -84,6 +80,25 @@ import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIden
 import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
 
 const DRIVER = ProviderDriverKind.make("antigravity");
+// Background text generation spent the user's Google subscription on hidden agy sessions and then
+// deleted their session files, so Antigravity no longer generates titles, commits, or PR text.
+const unsupportedTextGeneration: ProviderInstance["textGeneration"] = (() => {
+  const unsupported = (operation: string) =>
+    Effect.fail(
+      new TextGenerationError({
+        operation,
+        detail: "Antigravity does not provide application text generation.",
+      }),
+    );
+  return {
+    generateCommitMessage: () => unsupported("generateCommitMessage"),
+    generatePrContent: () => unsupported("generatePrContent"),
+    generateBranchName: () => unsupported("generateBranchName"),
+    generateThreadTitle: () => unsupported("generateThreadTitle"),
+    generateReviewGuide: () => unsupported("generateReviewGuide"),
+    generateTranscriptionPostProcessing: () => unsupported("generateTranscriptionPostProcessing"),
+  };
+})();
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
 const isNodeRuntimeUnavailableError = Schema.is(NodeRuntimeUnavailableError);
 const isAcpRequestError = Schema.is(AcpErrors.AcpRequestError);
@@ -122,16 +137,13 @@ export type AntigravityDriverEnv =
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers;
 
-export const AntigravityDriver: ProviderDriver<
-  AntigravitySettings,
-  AntigravityDriverEnv,
-  AntigravityUsage.AntigravityUsage
-> = {
+// No usage reader: it parsed Antigravity's private conversation databases with a custom
+// protobuf decoder just to show token totals.
+export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityDriverEnv> = {
   driverKind: DRIVER,
   metadata: { displayName: "Antigravity", supportsMultipleInstances: true },
   configSchema: AntigravitySettings,
   defaultConfig: () => decodeSettings({}),
-  usage: AntigravityUsage.antigravityUsageReader,
   create: Effect.fn("AntigravityDriver.create")(function* ({
     instanceId,
     displayName,
@@ -162,7 +174,7 @@ export const AntigravityDriver: ProviderDriver<
       gcpProject: settings.gcpProject,
       gcpLocation: settings.gcpLocation,
     };
-    const authConfigIssue = antigravityAuthConfigIssue(auth);
+    const authConfigIssue = antigravityAuthConfigIssue(auth, instanceId);
     const processEnvironment = yield* mergeProviderInstanceEnvironment(environment);
     const userHome = resolveAntigravityUserHome(
       yield* HostProcess.Platform,
@@ -602,11 +614,7 @@ export const AntigravityDriver: ProviderDriver<
           Effect.provideService(Path.Path, path),
           Effect.catch(() => Effect.logWarning("Could not save Antigravity permission modes.")),
         ),
-      supportsTextGeneration: isAntigravityTextGenerationAvailable(profileDirectory).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-        Effect.orElseSucceed(() => false),
-      ),
+      supportsTextGeneration: Effect.succeed(false),
     }).pipe(
       Effect.mapError(
         (cause) =>
@@ -647,16 +655,6 @@ export const AntigravityDriver: ProviderDriver<
           nativeEventLogger: loggers.native,
           provider: DRIVER,
           threadId,
-        }),
-    });
-    const textGeneration = yield* makeAntigravityTextGeneration({
-      profileDirectory,
-      defaultModel,
-      withProcess: authFlow.withProcess,
-      makeRuntime: (cwd) =>
-        makeRuntime({
-          cwd,
-          mcpServers: [],
         }),
     });
 
@@ -737,7 +735,7 @@ export const AntigravityDriver: ProviderDriver<
               ),
             ),
       orchestrationAdapter,
-      textGeneration,
+      textGeneration: unsupportedTextGeneration,
       auth: authFlow.controller,
       refreshModels,
     } satisfies ProviderInstance;

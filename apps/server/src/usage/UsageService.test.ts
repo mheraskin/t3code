@@ -48,7 +48,6 @@ import * as CursorAccountReader from "@t3tools/provider-cursor/server/CursorAcco
 import * as CursorUsageAccounts from "@t3tools/provider-cursor/server/CursorUsageAccounts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
-import * as AntigravityUsage from "../provider/Drivers/AntigravityUsage.ts";
 import * as ProviderHostLive from "../provider/ProviderHostLive.ts";
 import { totalTokens, type UsageRecord } from "@t3tools/provider-core/server/usage";
 import * as UsageService from "./UsageService.ts";
@@ -198,7 +197,6 @@ const layerService = (input: {
   readonly secretStore?: Partial<ServerSecretStore.ServerSecretStore["Service"]>;
 }) =>
   layerCursorUsageAccounts(CursorAccountReader.layer).pipe(
-    Layer.provideMerge(AntigravityUsage.layer),
     Layer.provideMerge(MuseUsageHome.layer),
     Layer.provideMerge(ProviderHostLive.layer),
     Layer.provideMerge(CodexUsageHistory.layer.pipe(Layer.provideMerge(Sqlite.layerMemory))),
@@ -2469,30 +2467,14 @@ describe("UsageService", () => {
     }),
   );
 
-  it.effect("counts aliased OpenCode and Antigravity directories once", () =>
+  it.effect("counts aliased OpenCode directories once", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
       const opencode = NodePath.join(home, "opencode-store");
       const opencodeAlias = NodePath.join(home, "opencode-alias");
-      const conversations = NodePath.join(home, "antigravity-conversations");
-      const antigravityA = NodePath.join(home, "antigravity-a");
-      const antigravityB = NodePath.join(home, "antigravity-b");
       yield* Effect.promise(async () => {
         await NodeFSP.mkdir(opencode);
         await NodeFSP.symlink(opencode, opencodeAlias, "junction");
-        await NodeFSP.mkdir(conversations);
-        await NodeFSP.mkdir(antigravityA);
-        await NodeFSP.mkdir(antigravityB);
-        await NodeFSP.symlink(
-          conversations,
-          NodePath.join(antigravityA, "conversations"),
-          "junction",
-        );
-        await NodeFSP.symlink(
-          conversations,
-          NodePath.join(antigravityB, "conversations"),
-          "junction",
-        );
       });
       const service = yield* UsageService.make.pipe(
         Effect.provide(
@@ -2502,32 +2484,23 @@ describe("UsageService", () => {
             settings,
             environment: {
               OPENCODE_DATA_DIR: `${opencode},${opencodeAlias}`,
-              ANTIGRAVITY_DATA_DIR: `${antigravityA},${antigravityB}`,
             },
           }),
         ),
       );
       const summary = yield* service.readSummary(WINDOW);
-      const sourcesFor = (provider: "opencode" | "antigravity") =>
-        summary.sources.filter(
-          (source) =>
-            source.fingerprint.provider === provider &&
-            !source.fingerprint.resolvedHomePath.endsWith("antigravity-acp"),
-        );
-      assert.strictEqual(sourcesFor("opencode").length, 1);
-      assert.strictEqual(sourcesFor("antigravity").length, 1);
-      assert.strictEqual(
-        sourcesFor("opencode")[0]?.fingerprint.resolvedHomePath,
-        yield* Effect.promise(() => NodeFSP.realpath(opencode)),
+      const opencodeSources = summary.sources.filter(
+        (source) => source.fingerprint.provider === "opencode",
       );
+      assert.strictEqual(opencodeSources.length, 1);
       assert.strictEqual(
-        sourcesFor("antigravity")[0]?.fingerprint.resolvedHomePath,
-        yield* Effect.promise(() => NodeFSP.realpath(conversations)),
+        opencodeSources[0]?.fingerprint.resolvedHomePath,
+        yield* Effect.promise(() => NodeFSP.realpath(opencode)),
       );
     }),
   );
 
-  it.effect("reads Antigravity history from each instance's data directory", () =>
+  it.effect("does not read Antigravity's conversation databases", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
       const first = NodePath.join(home, "antigravity-first");
@@ -2579,77 +2552,14 @@ describe("UsageService", () => {
         ),
       );
       const summary = yield* service.readSummary(WINDOW);
-      const roots = summary.sources
-        .filter((source) => source.fingerprint.provider === "antigravity")
-        .map((source) => source.fingerprint.resolvedHomePath);
-      for (const [dir, outputTokens] of [
-        [first, 7],
-        [second, 11],
-      ] as const) {
-        const root = yield* Effect.promise(() => NodeFSP.realpath(dir));
-        assert.include(roots, root);
-        assert.strictEqual(
-          summary.buckets
-            .filter((bucket) => bucket.provider === "antigravity" && bucket.sourcePath === root)
-            .reduce((sum, bucket) => sum + bucket.totals.outputTokens, 0),
-          outputTokens,
-        );
-      }
-    }),
-  );
-
-  it.effect("reads Antigravity history from the default instance's T3-managed profile", () =>
-    Effect.gen(function* () {
-      const { settings, home } = yield* setup;
-      const prefix = "usage-service-antigravity-default-profile-test";
-      const stateDir = NodePath.join(home, prefix, "userdata");
-      const conversations = NodePath.join(
-        stateDir,
-        "providers",
-        "antigravity",
-        // sha256("antigravity"), the default instance's profile key.
-        "ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32",
-        "antigravity-acp",
-        "conversations",
+      assert.deepStrictEqual(
+        summary.sources.filter((source) => source.fingerprint.provider === "antigravity"),
+        [],
       );
-      yield* Effect.promise(async () => {
-        await NodeFSP.mkdir(conversations, { recursive: true });
-        const db = new NodeSqlite.DatabaseSync(NodePath.join(conversations, "profile.db"));
-        try {
-          db.exec("CREATE TABLE steps (idx INTEGER, metadata BLOB)");
-          // Step protobuf: 100 input tokens, 7 output tokens, and 2026-08-01T10:00Z.
-          const metadata = new Uint8Array([
-            0x4a,
-            4,
-            0x10,
-            100,
-            0x18,
-            7,
-            ...Buffer.from("420608a087b7d306", "hex"),
-          ]);
-          db.prepare("INSERT INTO steps VALUES (?, ?)").run(0, metadata);
-        } finally {
-          db.close();
-        }
-      });
-      yield* Effect.gen(function* () {
-        assert.strictEqual((yield* ServerConfig.ServerConfig).stateDir, stateDir);
-        const service = yield* UsageService.make;
-        const summary = yield* service.readSummary(WINDOW);
-        const root = yield* Effect.promise(() => NodeFSP.realpath(conversations));
-        assert.include(
-          summary.sources
-            .filter((source) => source.fingerprint.provider === "antigravity")
-            .map((source) => source.fingerprint.resolvedHomePath),
-          root,
-        );
-        assert.strictEqual(
-          summary.buckets
-            .filter((bucket) => bucket.provider === "antigravity" && bucket.sourcePath === root)
-            .reduce((sum, bucket) => sum + bucket.totals.outputTokens, 0),
-          7,
-        );
-      }).pipe(Effect.provide(layerService({ prefix, home, settings })));
+      assert.deepStrictEqual(
+        summary.buckets.filter((bucket) => bucket.provider === "antigravity"),
+        [],
+      );
     }),
   );
 
