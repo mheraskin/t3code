@@ -22,7 +22,10 @@ export class ProjectionMaintenanceError extends Schema.TaggedError<ProjectionMai
 ) {}
 
 export interface ProjectionMaintenanceV2Shape {
-  /** Deletes events the projections already cover once they are older than the retained history. */
+  /**
+   * Deletes deleted threads' transcripts once nothing shows them, then events the projections
+   * already cover once they are older than the retained history.
+   */
   readonly pruneEventStore: (betweenPages?: Effect.Effect<void>) => Effect.Effect<
     {
       readonly deletedEventCount: number;
@@ -252,10 +255,104 @@ export const layer: Layer.Layer<ProjectionMaintenanceV2, never, SqlClient.SqlCli
       return { deletedEventCount, deletedReceiptCount };
     });
 
+    // A deleted thread's transcript has no reader once no live fork shows it and its deletion
+    // effects ran. The thread row, checkpoint rows and provider rows stay: storage cleanup reads
+    // the tombstone and its scopes to remove worktrees and refs, and sessions can be shared.
+    const purgeDeletedThreadHistory = Effect.fnUntraced(function* (
+      betweenPages: Effect.Effect<void>,
+    ) {
+      const threads = yield* sql<{ readonly thread_id: string }>`
+        WITH RECURSIVE retained(thread_id) AS (
+          SELECT thread_id FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL
+          UNION
+          SELECT CASE json_extract(t.payload_json, '$.forkedFrom.type')
+            WHEN 'run' THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
+            WHEN 'node' THEN (
+              SELECT node.thread_id FROM orchestration_v2_projection_nodes AS node
+              WHERE node.node_id = json_extract(t.payload_json, '$.forkedFrom.nodeId')
+            )
+            WHEN 'provider_thread' THEN (
+              SELECT provider_thread.thread_id
+              FROM orchestration_v2_projection_provider_threads AS provider_thread
+              WHERE provider_thread.provider_thread_id =
+                json_extract(t.payload_json, '$.forkedFrom.providerThreadId')
+            )
+          END
+          FROM orchestration_v2_projection_threads AS t
+          JOIN retained USING (thread_id)
+          WHERE json_type(t.payload_json, '$.forkedFrom') = 'object'
+        )
+        SELECT t.thread_id
+        FROM orchestration_v2_projection_threads AS t
+        WHERE t.deleted_at IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM retained WHERE retained.thread_id = t.thread_id)
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_v2_effect_outbox AS effect
+            WHERE effect.thread_id = t.thread_id AND effect.status IN ('pending', 'running')
+          )
+          AND (
+            EXISTS (SELECT 1 FROM orchestration_v2_projection_runs WHERE thread_id = t.thread_id)
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_messages WHERE thread_id = t.thread_id
+            )
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_turn_items WHERE thread_id = t.thread_id
+            )
+          )
+      `.pipe(NodeSqliteClient.readOnly);
+      for (const { thread_id: threadId } of threads) {
+        // Transcripts can run to gigabytes, so delete them a page at a time.
+        for (const table of [
+          "orchestration_v2_projection_turn_items",
+          "orchestration_v2_projection_messages",
+        ]) {
+          for (;;) {
+            const rows = yield* sql<{ readonly rowid: number }>`
+              SELECT rowid FROM ${sql.literal(table)}
+              WHERE thread_id = ${threadId}
+              LIMIT ${PAGE_SIZE}
+            `;
+            if (rows.length === 0) break;
+            const rowIds = rows.map((row) => row.rowid);
+            yield* sql`DELETE FROM ${sql.literal(table)} WHERE rowid IN ${sql.in(rowIds)}`;
+            yield* Effect.yieldNow;
+            yield* betweenPages;
+          }
+        }
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            for (const table of [
+              "orchestration_v2_turn_item_positions",
+              "orchestration_v2_projection_turn_item_counts",
+              "orchestration_v2_projection_thread_item_counts",
+              "orchestration_v2_projection_plans",
+              "orchestration_v2_projection_runtime_requests",
+              "orchestration_v2_projection_subagents",
+              "orchestration_v2_projection_context_handoffs",
+              "orchestration_v2_projection_run_attempts",
+              "orchestration_v2_projection_nodes",
+              "orchestration_v2_projection_runs",
+              "mcp_app_model_context",
+            ]) {
+              yield* sql`DELETE FROM ${sql.literal(table)} WHERE thread_id = ${threadId}`;
+            }
+            yield* sql`
+              DELETE FROM orchestration_v2_projection_context_transfers
+              WHERE source_thread_id = ${threadId} OR target_thread_id = ${threadId}
+            `;
+          }),
+        );
+        yield* Effect.yieldNow;
+        yield* betweenPages;
+      }
+      return threads.length;
+    });
+
     // A pass prunes through the mark the previous pass left once that mark is a day old, so
     // at least RETAINED_EVENT_HISTORY of events always remains. Receipts stay for idempotency.
     const pruneEventStore = Effect.fn("ProjectionMaintenance.pruneEventStore")(
       function* (betweenPages: Effect.Effect<void> = Effect.void) {
+        yield* purgeDeletedThreadHistory(betweenPages);
         const now = yield* DateTime.now;
         const metadata = yield* sql<MetadataRow>`
           SELECT projection_name, last_sequence, updated_at

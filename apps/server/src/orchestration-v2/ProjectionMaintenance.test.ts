@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   EventId,
+  MessageId,
   NodeId,
   PlanId,
   type OrchestrationV2AppThread,
@@ -9,6 +10,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -382,4 +384,122 @@ it.effect("keeps an anchor that a row appended during the pass borrows from", ()
       );
     }),
   ).pipe(Effect.provide(layerTest)),
+);
+
+const messageEvent = (threadId: ThreadId, now: DateTime.Utc, text: string) =>
+  ({
+    id: EventId.make(`event:purge:message:${threadId}`),
+    type: "message.updated",
+    threadId,
+    occurredAt: now,
+    payload: {
+      id: MessageId.make(`message:purge:${threadId}`),
+      threadId,
+      runId: null,
+      nodeId: null,
+      createdBy: "user",
+      creationSource: "web",
+      role: "user",
+      text,
+      streaming: false,
+      attachments: [],
+      createdAt: now,
+      updatedAt: now,
+    },
+  }) satisfies OrchestrationV2DomainEvent;
+
+const threadDeleted = (thread: OrchestrationV2AppThread, now: DateTime.Utc) =>
+  ({
+    id: EventId.make(`event:purge:deleted:${thread.id}`),
+    type: "thread.deleted",
+    threadId: thread.id,
+    providerInstanceId,
+    occurredAt: now,
+    payload: { ...thread, deletedAt: now, updatedAt: now },
+  }) satisfies OrchestrationV2DomainEvent;
+
+// Every table with a thread column, so a table added later cannot keep a deleted transcript.
+const tablesHoldingThread = (threadId: ThreadId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const columns = yield* sql<{ readonly table_name: string; readonly column_name: string }>`
+      SELECT m.name AS table_name, c.name AS column_name
+      FROM sqlite_master AS m, pragma_table_info(m.name) AS c
+      WHERE m.type = 'table' AND c.name IN ('thread_id', 'source_thread_id', 'target_thread_id')
+    `;
+    const holding = new Set<string>();
+    for (const { table_name, column_name } of columns) {
+      const rows = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM ${sql.literal(table_name)}
+        WHERE ${sql.literal(column_name)} = ${threadId}
+      `;
+      if ((rows[0]?.count ?? 0) > 0) holding.add(table_name);
+    }
+    return [...holding].sort();
+  });
+
+const searchHits = (term: string) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) => sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count FROM orchestration_v2_message_search
+      WHERE orchestration_v2_message_search MATCH ${term}
+    `,
+  ).pipe(Effect.map((rows) => rows[0]?.count ?? 0));
+
+it.effect("purges a deleted thread's transcript unless a live fork still shows it", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+    const now = yield* DateTime.now;
+    const deleted = makeThread(ThreadId.make("thread:purge-deleted"), now);
+    const forkSource = makeThread(ThreadId.make("thread:purge-fork-source"), now);
+    const fork = {
+      ...makeThread(ThreadId.make("thread:purge-fork"), now),
+      forkedFrom: { type: "run" as const, threadId: forkSource.id, runId: RunId.make("run:purge") },
+    };
+    for (const thread of [deleted, forkSource, fork]) {
+      yield* sink.write({
+        events: [
+          { ...threadCreated(thread, now), id: EventId.make(`event:purge:created:${thread.id}`) },
+        ],
+      });
+    }
+    for (const thread of [deleted, forkSource]) {
+      yield* sink.write({ events: [messageEvent(thread.id, now, `secret ${thread.id}`)] });
+      for (const spec of itemSpecs.slice(0, 3)) {
+        yield* sink.write({
+          events: [itemEvent(thread.id, now, spec, 69, `event:purge:${thread.id}:${spec.key}`)],
+        });
+      }
+    }
+    yield* sink.write({ events: subagentEvents(deleted.id, now, 0, "purge") });
+    assert.includeMembers(yield* tablesHoldingThread(deleted.id), [
+      "orchestration_v2_projection_messages",
+      "orchestration_v2_projection_subagents",
+      "orchestration_v2_projection_turn_items",
+    ]);
+    const forkSourceTables = yield* tablesHoldingThread(forkSource.id);
+    assert.equal(yield* searchHits("secret"), 2);
+
+    yield* sink.write({ events: [threadDeleted(deleted, now), threadDeleted(forkSource, now)] });
+    yield* maintenance.pruneEventStore();
+
+    // The tombstone stays for worktree and checkpoint-ref cleanup.
+    assert.deepEqual(yield* tablesHoldingThread(deleted.id), [
+      "orchestration_v2_projection_threads",
+    ]);
+    // The live fork shows its deleted source's history, so that history stays.
+    assert.deepEqual(yield* tablesHoldingThread(forkSource.id), forkSourceTables);
+    assert.equal(yield* searchHits("secret"), 1);
+
+    yield* sink.write({ events: [threadDeleted(fork, now)] });
+    yield* maintenance.pruneEventStore();
+    for (const thread of [forkSource, fork]) {
+      assert.deepEqual(yield* tablesHoldingThread(thread.id), [
+        "orchestration_v2_projection_threads",
+      ]);
+    }
+    assert.equal(yield* searchHits("secret"), 0);
+  }).pipe(Effect.provide(layerTest)),
 );
