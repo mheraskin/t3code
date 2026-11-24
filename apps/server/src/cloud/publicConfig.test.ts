@@ -80,3 +80,17 @@ it("product opt-out disables relay tracing with either built-in or runtime crede
     null,
   );
 });
+
+it("never enables relay tracing, even when telemetry is turned on", () => {
+  assert.equal(
+    resolveRelayClientTracingConfig(
+      { T3CODE_TELEMETRY_ENABLED: "true" },
+      {
+        tracesUrl: "https://embedded.example.test/v1/traces",
+        tracesDataset: "embedded-dataset",
+        tracesToken: "embedded-token",
+      },
+    ),
+    null,
+  );
+});

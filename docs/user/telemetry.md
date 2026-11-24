@@ -1,5 +1,11 @@
 # Product usage data
 
+**This fork disables telemetry.** The server, desktop, web, and mobile apps send no product usage
+events, no account or device identifiers, and no relay connection traces, and there is no setting
+or environment variable that turns them back on. Mobile crash reports are off unless you turn on
+**Send crash reports**. OpenTelemetry export to a receiver you configure yourself still works. The
+rest of this page describes upstream T3 Code.
+
 The T3 Code server sends product usage events to T3 Code's own endpoint at `ingest.t3.codes`,
 associated with a hashed account or installation identifier. To count how many installations one person
 uses, the server also sends hashed account identifiers: your T3 Connect account, your OpenAI and

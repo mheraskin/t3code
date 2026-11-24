@@ -2,7 +2,6 @@ import Constants from "expo-constants";
 import { type ReleaseChannel, releaseResourceAttributes } from "@t3tools/shared/releaseResource";
 import * as RelayTracing from "@t3tools/shared/relayTracing";
 
-import { hasTracingPublicConfig, resolveCloudPublicConfig } from "../cloud/publicConfig";
 
 export interface TracingConfig {
   readonly tracesUrl: string;
@@ -22,15 +21,6 @@ const RELEASE_CHANNEL_BY_VARIANT: Readonly<Record<string, ReleaseChannel | undef
   production: "stable",
 };
 
-export function resolveTracingConfig(): TracingConfig | null {
-  const config = resolveCloudPublicConfig();
-  if (!hasTracingPublicConfig(config)) {
-    return null;
-  }
-  const { tracesUrl, tracesDataset, tracesToken } = config.observability;
-  return { tracesUrl, tracesDataset, tracesToken };
-}
-
 export function layerFromConfig(config: TracingConfig | null, resource: TracingResource) {
   const channel =
     typeof __DEV__ !== "undefined" && __DEV__
@@ -46,7 +36,8 @@ export function layerFromConfig(config: TracingConfig | null, resource: TracingR
   });
 }
 
-export const layer = layerFromConfig(resolveTracingConfig(), {
+// Privacy fork: relay spans would go to T3's Axiom account, so mobile never exports them.
+export const layer = layerFromConfig(null, {
   serviceVersion: Constants.expoConfig?.version,
   serviceInstanceId: Constants.sessionId,
   appVariant:

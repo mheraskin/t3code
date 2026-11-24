@@ -11,44 +11,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const answers = (...values: Array<boolean | null>) => {
-  let call = 0;
-  return () => values[Math.min(call++, values.length - 1)] ?? null;
-};
-
 describe("web runtime relay telemetry policy", () => {
   it.each([
-    {
-      surface: "desktop opt-out",
-      desktopBridge: { getRelayTelemetryEnabled: () => false },
-      exports: false,
-    },
-    {
-      surface: "desktop enabled",
-      desktopBridge: { getRelayTelemetryEnabled: () => true },
-      exports: true,
-    },
-    {
-      // The desktop host reads the login shell after the renderer has started.
-      surface: "desktop enabled once the login shell is read",
-      desktopBridge: { getRelayTelemetryEnabled: answers(null, true) },
-      exports: true,
-    },
-    {
-      surface: "desktop opt-out found in the login shell",
-      desktopBridge: { getRelayTelemetryEnabled: answers(null, false, true) },
-      exports: false,
-    },
-    {
-      surface: "ordinary browser ignores host opt-out",
-      desktopBridge: undefined,
-      exports: true,
-    },
-  ])("applies $surface before the first relay span", async ({ desktopBridge, exports }) => {
+    { surface: "desktop opt-out", desktopBridge: { getRelayTelemetryEnabled: () => false } },
+    { surface: "desktop enabled", desktopBridge: { getRelayTelemetryEnabled: () => true } },
+    { surface: "ordinary browser", desktopBridge: undefined },
+  ])("never exports relay spans from $surface", async ({ desktopBridge }) => {
     vi.resetModules();
-    vi.stubEnv("T3CODE_TELEMETRY_ENABLED", "false");
-    vi.stubEnv("T3CODE_OTEL_SDK_DISABLED", "true");
-    vi.stubEnv("OTEL_SDK_DISABLED", "true");
+    vi.stubEnv("T3CODE_TELEMETRY_ENABLED", "true");
     vi.stubEnv("VITE_RELAY_OTLP_TRACES_URL", "https://telemetry.example.test/v1/traces");
     vi.stubEnv("VITE_RELAY_OTLP_TRACES_DATASET", "relay-test");
     vi.stubEnv("VITE_RELAY_OTLP_TRACES_TOKEN", "test-token");
@@ -86,13 +56,6 @@ describe("web runtime relay telemetry policy", () => {
       await freshRuntime.dispose();
     }
 
-    if (exports) {
-      expect(fetchFn).toHaveBeenCalledOnce();
-      expect(String(fetchFn.mock.calls[0]?.[0])).toBe("https://telemetry.example.test/v1/traces");
-      const payload = new TextDecoder().decode(fetchFn.mock.calls[0]?.[1]?.body as Uint8Array);
-      expect(payload).toContain('"name":"relay.first-operation"');
-    } else {
-      expect(fetchFn).not.toHaveBeenCalled();
-    }
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });
