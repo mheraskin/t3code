@@ -89,7 +89,7 @@ const oneOf = (value: string | undefined, allowed: ReadonlyArray<string>) =>
  * Whether two resolved providers differ. Unresolved selections compare as
  * unknown rather than as a cross-provider handoff.
  */
-export const crossProvider = (caller: string, target: string) =>
+const crossProvider = (caller: string, target: string) =>
   caller === "unknown" || target === "unknown" ? undefined : caller !== target;
 
 const defined = (entries: Readonly<Record<string, unknown>>) =>

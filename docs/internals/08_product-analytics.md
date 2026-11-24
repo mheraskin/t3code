@@ -1,5 +1,11 @@
 # Product analytics
 
+> **Privacy fork (`privacy-hardening`):** product analytics are removed. `AnalyticsService` is a
+> no-op with no env var or policy that turns it on, the server reads no provider login files for
+> identity, provider usage and delegated-task analytics are unwired, OTLP export is off unless
+> `T3CODE_OTEL_SDK_DISABLED=false` is set, and relay tracing is always off. The rest of this page
+> describes upstream behavior.
+
 The server owns analytics delivery, opt-out, and identity for every connected client. Clients never
 load the PostHog browser SDK, PostHog person profiles stay disabled, and visiting hosted web without
 an authenticated connection does not count as product use.

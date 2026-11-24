@@ -6,8 +6,15 @@ import * as OtlpResource from "effect/observability/OtlpResource";
 
 import * as OtelEnvironment from "./otelEnvironment.ts";
 
-const load = (env: Record<string, string>) =>
+const loadRaw = (env: Record<string, string>) =>
   OtelEnvironment.load.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))));
+// Export is off by default in this fork; tests of endpoint resolution opt in first.
+const load = (env: Record<string, string>) =>
+  loadRaw(
+    "T3CODE_OTEL_SDK_DISABLED" in env || "OTEL_SDK_DISABLED" in env
+      ? env
+      : { T3CODE_OTEL_SDK_DISABLED: "false", ...env },
+  );
 
 const SPEC_OFF =
   "OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it; set T3CODE_OTEL_SDK_DISABLED=false to export anyway";
@@ -18,12 +25,12 @@ const specIgnored = (value: string) =>
 
 describe("OtelEnvironment", () => {
   it.effect.each([
-    { name: "nothing set", env: {}, disabled: false, warnings: [] },
+    { name: "nothing set", env: {}, disabled: true, warnings: [] },
     { name: "spec true", env: { OTEL_SDK_DISABLED: "true" }, disabled: true, warnings: [SPEC_OFF] },
     {
       name: "spec 1",
       env: { OTEL_SDK_DISABLED: "1" },
-      disabled: false,
+      disabled: true,
       warnings: [specIgnored("1")],
     },
     { name: "t3 1", env: { T3CODE_OTEL_SDK_DISABLED: "1" }, disabled: true, warnings: [T3_OFF] },
@@ -41,7 +48,7 @@ describe("OtelEnvironment", () => {
     },
   ])("$name", ({ env, disabled, warnings }) =>
     Effect.gen(function* () {
-      const resolved = yield* load(env);
+      const resolved = yield* loadRaw(env);
       assert.strictEqual(resolved.disabled, disabled);
       assert.deepStrictEqual(resolved.warnings, warnings);
     }),
@@ -387,19 +394,12 @@ describe("OtelEnvironment", () => {
 });
 
 describe("isRelayTracingEnabled", () => {
-  it("defaults on and respects the T3CODE SDK override of the standard kill switch", () => {
-    assert.isTrue(OtelEnvironment.isRelayTracingEnabled({}));
-    assert.isFalse(OtelEnvironment.isRelayTracingEnabled({ OTEL_SDK_DISABLED: "true" }));
-    assert.isTrue(
-      OtelEnvironment.isRelayTracingEnabled({
-        OTEL_SDK_DISABLED: "true",
-        T3CODE_OTEL_SDK_DISABLED: "false",
-      }),
-    );
+  it("is off whatever the environment says", () => {
+    assert.isFalse(OtelEnvironment.isRelayTracingEnabled({}));
     assert.isFalse(
       OtelEnvironment.isRelayTracingEnabled({
-        OTEL_SDK_DISABLED: "false",
-        T3CODE_OTEL_SDK_DISABLED: "true",
+        T3CODE_TELEMETRY_ENABLED: "true",
+        T3CODE_OTEL_SDK_DISABLED: "false",
       }),
     );
   });

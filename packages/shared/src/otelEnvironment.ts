@@ -282,7 +282,8 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
   }),
 }).pipe(
   Effect.map(({ t3, spec, resource, generic, exporters, ...own }) => {
-    const disabled = t3.value ?? spec.value ?? false;
+    // Privacy fork: no OTLP export unless the user explicitly sets T3CODE_OTEL_SDK_DISABLED=false.
+    const disabled = t3.value ?? spec.value ?? true;
     const signals = disabled
       ? undefined
       : {
@@ -299,7 +300,7 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
       resource.warning,
       ...Array.from(used, (setting) => setting.warning),
     ].filter((warning) => warning !== undefined);
-    if (disabled) {
+    if (disabled && (t3.value === true || spec.value === true)) {
       warnings.push(
         t3.value
           ? "T3CODE_OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it"
@@ -318,18 +319,10 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
   Effect.orDie,
 );
 
-export const isRelayTracingEnabled = (env: Readonly<Record<string, string | undefined>>) =>
-  Config.all({
-    ...sdkFlags,
-    telemetry: flag("T3CODE_TELEMETRY_ENABLED", T3CODE_TRUE, T3CODE_FALSE, String),
-  }).pipe(
-    Effect.map(
-      ({ telemetry, t3, spec }) => telemetry.value !== false && !(t3.value ?? spec.value ?? false),
-    ),
-    Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env))),
-    Effect.orDie,
-    Effect.runSync,
-  );
+// Privacy fork: relay diagnostics tracing goes to a third party (Axiom), so it is
+// off for every environment and cannot be turned back on.
+export const isRelayTracingEnabled = (_env: Readonly<Record<string, string | undefined>>) =>
+  false;
 
 export type SignalName = "traces" | "metrics" | "logs";
 
