@@ -207,9 +207,7 @@ describe("remote environment authorization", () => {
         connectionMethod: "relay",
       }).pipe(provideRemoteHttp(fetch.fetchFn));
 
-      expect(url).toBe(
-        "wss://remote.example.com/ws?wsTicket=ws-ticket&connectionMethod=relay",
-      );
+      expect(url).toBe("wss://remote.example.com/ws?wsTicket=ws-ticket&connectionMethod=relay");
     }),
   );
 

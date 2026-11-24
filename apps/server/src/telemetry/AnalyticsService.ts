@@ -30,10 +30,12 @@ export class AnalyticsService extends Context.Service<
 export const make = Effect.succeed(
   AnalyticsService.of({
     record: Effect.fn("AnalyticsService.record")(function* () {
-      return false;
+      return yield* Effect.succeed(false);
     }),
     flush: Effect.void,
-    recordOwners: Effect.fn("AnalyticsService.recordOwners")(function* () {}),
+    recordOwners: Effect.fn("AnalyticsService.recordOwners")(function* () {
+      yield* Effect.void;
+    }),
   }),
 );
 

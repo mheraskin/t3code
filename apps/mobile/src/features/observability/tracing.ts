@@ -2,7 +2,6 @@ import Constants from "expo-constants";
 import { type ReleaseChannel, releaseResourceAttributes } from "@t3tools/shared/releaseResource";
 import * as RelayTracing from "@t3tools/shared/relayTracing";
 
-
 export interface TracingConfig {
   readonly tracesUrl: string;
   readonly tracesDataset: string;

@@ -321,8 +321,7 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
 
 // Privacy fork: relay diagnostics tracing goes to a third party (Axiom), so it is
 // off for every environment and cannot be turned back on.
-export const isRelayTracingEnabled = (_env: Readonly<Record<string, string | undefined>>) =>
-  false;
+export const isRelayTracingEnabled = (_env: Readonly<Record<string, string | undefined>>) => false;
 
 export type SignalName = "traces" | "metrics" | "logs";
 

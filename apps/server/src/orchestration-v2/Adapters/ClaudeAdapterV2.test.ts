@@ -6012,7 +6012,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       const request = first.event.runtimeRequest;
       assert.equal(request.status, "pending");
       assert.equal(request.kind, "command");
-      yield* harness.runtime.respondToRuntimeRequest({ requestId: request.id, decision: "decline" });
+      yield* harness.runtime.respondToRuntimeRequest({
+        requestId: request.id,
+        decision: "decline",
+      });
       const result = yield* Fiber.join(decision);
       assert.equal(result?.behavior, "deny");
     }).pipe(
