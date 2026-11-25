@@ -14,6 +14,7 @@ export class AnalyticsService extends Context.Service<
     readonly record: (
       event: string,
       properties?: Readonly<Record<string, unknown>>,
+      options?: { readonly anonymous?: boolean },
     ) => Effect.Effect<boolean>;
 
     readonly flush: Effect.Effect<void>;

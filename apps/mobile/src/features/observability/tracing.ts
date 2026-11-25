@@ -2,6 +2,8 @@ import Constants from "expo-constants";
 import { type ReleaseChannel, releaseResourceAttributes } from "@t3tools/shared/releaseResource";
 import * as RelayTracing from "@t3tools/shared/relayTracing";
 
+import { connectionTracesEnabled } from "./diagnosticsSetting";
+
 export interface TracingConfig {
   readonly tracesUrl: string;
   readonly tracesDataset: string;
@@ -25,14 +27,18 @@ export function layerFromConfig(config: TracingConfig | null, resource: TracingR
     typeof __DEV__ !== "undefined" && __DEV__
       ? "dev"
       : RELEASE_CHANNEL_BY_VARIANT[resource.appVariant];
-  return RelayTracing.layer(config, {
-    serviceName: "t3code-mobile",
-    serviceVersion: resource.serviceVersion,
-    runtime: "react-native",
-    serviceInstanceId: resource.serviceInstanceId,
-    client: `mobile-${resource.appVariant}`,
-    attributes: channel && releaseResourceAttributes(channel),
-  });
+  return RelayTracing.layer(
+    config,
+    {
+      serviceName: "t3code-mobile",
+      serviceVersion: resource.serviceVersion,
+      runtime: "react-native",
+      serviceInstanceId: resource.serviceInstanceId,
+      client: `mobile-${resource.appVariant}`,
+      attributes: channel && releaseResourceAttributes(channel),
+    },
+    { isEnabled: connectionTracesEnabled },
+  );
 }
 
 // Privacy fork: relay spans would go to T3's Axiom account, so mobile never exports them.

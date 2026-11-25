@@ -519,7 +519,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
           return Deferred.succeed(event.acknowledge, undefined).pipe(Effect.asVoid);
         }
         if (event._tag === "ConfigOptionsUpdated") {
-          return provider.onConfigOptionsUpdated(event.configOptions);
+          return provider.onConfigOptionsUpdated(event.configOptions, { fromCatalogProbe: true });
         }
         return event._tag === "AvailableCommandsUpdated"
           ? provider.onAvailableCommands(event.availableCommands)
@@ -639,8 +639,10 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         ),
       ),
       profileDirectory,
-      onSessionStarted: (started, cwd) =>
-        provider.onSessionStarted(started, cwd).pipe(Effect.andThen(authFlow.onSignedInElsewhere)),
+      onSessionStarted: (started, cwd, session) =>
+        provider
+          .onSessionStarted(started, cwd, session)
+          .pipe(Effect.andThen(authFlow.onSignedInElsewhere)),
       onSessionEvent: (event, cwd) => {
         if (event._tag === "ConfigOptionsUpdated") {
           return provider.onConfigOptionsUpdated(event.configOptions);
@@ -697,7 +699,9 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
               detail: isAntigravitySignInRequiredError(cause)
                 ? "Sign in to Antigravity in provider settings before refreshing models."
                 : cause._tag === "ProviderSetupError" &&
-                    (cause.operation === "configure" || cause.operation === "start")
+                    (cause.operation === "configure" ||
+                      cause.operation === "resolve" ||
+                      cause.operation === "start")
                   ? cause.detail
                   : cause._tag === "AcpTransportError" &&
                       isProviderSetupError(cause.cause) &&
