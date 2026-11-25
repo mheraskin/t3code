@@ -1978,6 +1978,40 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       effect.pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
   );
 
+  /** Subagent threads die with their parent, nested ones included; forks and side chats do not. */
+  const liveSubagentChildIds = Effect.fn("Orchestrator.liveSubagentChildIds")(
+    function* (threadId: ThreadId) {
+      const childIds: Array<ThreadId> = [];
+      const visited = new Set<ThreadId>([threadId]);
+      const parents = [threadId];
+      for (let parentId = parents.pop(); parentId !== undefined; parentId = parents.pop()) {
+        const { subagents } = yield* projectionStore.getThreadRecords(parentId, ["subagents"]).pipe(
+          Effect.catchTags({
+            ProjectionStoreThreadNotFoundError: () => Effect.succeed({ subagents: [] }),
+          }),
+        );
+        for (const task of subagents) {
+          if (task.childThreadId === null || visited.has(task.childThreadId)) continue;
+          visited.add(task.childThreadId);
+          const child = yield* projectionStore.findThread(task.childThreadId);
+          if (
+            child === null ||
+            child.deletedAt !== null ||
+            child.lineage.relationshipToParent !== "subagent" ||
+            child.lineage.parentThreadId !== parentId
+          ) {
+            continue;
+          }
+          childIds.push(child.id);
+          parents.push(child.id);
+        }
+      }
+      return childIds;
+    },
+    (effect, threadId) =>
+      effect.pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
+  );
+
   const getProjectionWithPendingEvents =
     /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
     Effect.fnUntraced(function* (
@@ -16039,6 +16073,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const dispatchOnce = Effect.fn("orchestrationV2.dispatch.once")(function* (
     command: OrchestrationV2ServerCommand,
     sideChatIds: ReadonlyArray<ThreadId>,
+    subagentChildIds: ReadonlyArray<ThreadId>,
   ): Effect.fn.Return<
     {
       readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
@@ -16173,8 +16208,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             return { events: [], effects: [] };
           }
         }
-        // The dispatch wrapper holds each side chat's lock, so none can commit after this plan.
-        const plan = yield* planDeletion(command);
+        // The dispatch wrapper holds each side chat's and subagent's lock, so none can commit after this plan.
+        const parentPlan = yield* planDeletion(command);
+        const childPlans = yield* Effect.forEach(subagentChildIds, (threadId) =>
+          planDeletion({
+            ...command,
+            commandId: CommandId.make(`${command.commandId}:subagent:${threadId}`),
+            threadId,
+          }),
+        );
+        const plan = {
+          events: [...parentPlan.events, ...childPlans.flatMap((child) => child.events)],
+          effects: [...parentPlan.effects, ...childPlans.flatMap((child) => child.effects)],
+        };
         const promotions = yield* Effect.forEach(sideChatIds, (threadId) =>
           projectionStore.getThread(threadId).pipe(
             Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
@@ -16587,11 +16633,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     } satisfies OrchestratorV2DispatchResult;
   });
 
-  /** `sideChatIds` are the live side chats a delete, archive, or unarchive cascades to, read under their locks. */
+  /**
+   * `sideChatIds` are the live side chats a delete, archive, or unarchive cascades to, and
+   * `subagentChildIds` the subagent threads a delete takes with it, read under their locks.
+   */
   const dispatchWithReceiptEffect = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
     command: OrchestrationV2ServerCommand,
     sideChatIds: ReadonlyArray<ThreadId> = [],
     cancelledTask?: OrchestrationV2Subagent,
+    subagentChildIds: ReadonlyArray<ThreadId> = [],
   ): Effect.fn.Return<OrchestratorV2DispatchResult, OrchestratorV2Error> {
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
@@ -16644,7 +16694,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
     }
 
-    const plan = yield* dispatchOnce(command, sideChatIds).pipe(
+    const plan = yield* dispatchOnce(command, sideChatIds, subagentChildIds).pipe(
       Effect.tap((planned) => refuseAboveRuntimeModeCeiling(command, planned.events)),
       Effect.filterOrFail(
         (planned) =>
@@ -16910,11 +16960,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     ) {
       const cascade = threadDispatch.withLock(
         command.threadId,
-        liveSideChatIds(command.threadId).pipe(
-          Effect.flatMap((sideChatIds) =>
-            sideChatIds.reduce(
-              (locked, sideChatId) => threadDispatch.withLock(sideChatId, locked),
-              dispatchWithReceiptEffect(command, sideChatIds),
+        Effect.all([
+          liveSideChatIds(command.threadId),
+          command.type === "thread.delete"
+            ? liveSubagentChildIds(command.threadId)
+            : Effect.succeed<ReadonlyArray<ThreadId>>([]),
+        ]).pipe(
+          Effect.flatMap(([sideChatIds, subagentChildIds]) =>
+            // reduceRight takes the first id's lock first, so a subagent's parent locks before it.
+            [...sideChatIds, ...subagentChildIds].reduceRight(
+              (locked, childId) => threadDispatch.withLock(childId, locked),
+              dispatchWithReceiptEffect(command, sideChatIds, undefined, subagentChildIds),
             ),
           ),
         ),

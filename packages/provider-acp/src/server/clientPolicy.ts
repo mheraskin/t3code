@@ -195,10 +195,24 @@ export function acpPermissionDisposition(
   runtimePolicy: AcpRuntimePolicy,
   request: EffectAcpSchema.RequestPermissionRequest,
 ): AcpPermissionDisposition {
-  return acpOperationDisposition(runtimePolicy, {
-    kind: request.toolCall.kind,
-    locations: request.toolCall.locations,
-  });
+  const operation = { kind: request.toolCall.kind, locations: request.toolCall.locations };
+  const disposition = acpOperationDisposition(runtimePolicy, operation);
+  // Auto has no sandbox here, so only reads and workspace edits pass unasked; commands,
+  // deletes, moves, fetches and unknown tools go to the user.
+  if (
+    disposition === "allow" &&
+    runtimePolicy.runtimeMode === "auto" &&
+    runtimePolicy.approvalPolicy === undefined &&
+    runtimePolicy.sandboxPolicy === undefined &&
+    !isAcpReadKind(operation.kind ?? "other") &&
+    !(
+      operation.kind === "edit" &&
+      acpWorkspaceWriteAllowsMutation(runtimePolicy, {}, operation.locations)
+    )
+  ) {
+    return "ask";
+  }
+  return disposition;
 }
 
 export function acpMcpToolApprovalElicitationDisposition(

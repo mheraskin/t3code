@@ -99,6 +99,33 @@ describe("acpPermissionDisposition", () => {
     assert.equal(acpPermissionDisposition(policy, permissionRequest("execute")), "deny");
   });
 
+  it("auto allows reads and workspace edits and asks about everything else", () => {
+    const auto: AcpRuntimePolicy = { runtimeMode: "auto", cwd };
+    for (const kind of ["read", "search", "think"] as const) {
+      assert.equal(acpPermissionDisposition(auto, permissionRequest(kind)), "allow");
+    }
+    assert.equal(
+      acpPermissionDisposition(auto, permissionRequest("edit", [{ path: "src/index.ts" }])),
+      "allow",
+    );
+    assert.equal(
+      acpPermissionDisposition(
+        auto,
+        permissionRequest("edit", [{ path: NodePath.resolve(cwd, "..", "outside.ts") }]),
+      ),
+      "ask",
+    );
+    assert.equal(acpPermissionDisposition(auto, permissionRequest("edit")), "ask");
+    for (const kind of ["execute", "delete", "move", "fetch", "other"] as const) {
+      assert.equal(
+        acpPermissionDisposition(auto, permissionRequest(kind, [{ path: "src/index.ts" }])),
+        "ask",
+      );
+    }
+    // Client terminals keep following the agent's own Auto review.
+    assert.equal(acpClientExecuteDisposition(auto), "allow");
+  });
+
   it("auto-accept-edits approves file changes without locations and asks for the rest", () => {
     const autoAcceptEdits: AcpRuntimePolicy = { runtimeMode: "auto-accept-edits", cwd };
     for (const kind of ["edit", "delete", "move"] as const) {

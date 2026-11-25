@@ -3447,3 +3447,117 @@ it.each([
     assert.isAtMost(reads.count, 2 * (size + size));
   },
 );
+
+it.effect("deleting a parent deletes and purges its subagent threads, but not forks", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const outbox = yield* EffectOutbox.EffectOutboxV2;
+    const parentThreadId = ThreadId.make("thread:cascade-parent");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-cascade-parent"),
+      threadId: parentThreadId,
+      projectId: ProjectId.make("project:cascade"),
+      title: "Parent",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("start-cascade-parent"),
+      threadId: parentThreadId,
+      messageId: MessageId.make("message:cascade-parent"),
+      text: "Delegate the research",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const parentRun = (yield* projections.getThreadProjection(parentThreadId)).runs[0]!;
+    yield* orchestrator.dispatch({
+      type: "delegated_task.request",
+      commandId: CommandId.make("delegate-cascade-task"),
+      parentThreadId,
+      parentRunId: parentRun.id,
+      parentNodeId: parentRun.rootNodeId!,
+      task: "Research the sources",
+      completionWake: "settled_only",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+    const parent = yield* projections.getThreadProjection(parentThreadId);
+    const task = parent.subagents[0]!;
+    const childThreadId = task.childThreadId!;
+    const child = yield* projections.getThread(childThreadId);
+    const nestedThreadId = ThreadId.make("thread:cascade-nested");
+    const forkThreadId = ThreadId.make("thread:cascade-fork");
+    const now = yield* DateTime.now;
+    // A provider subagent of the delegated thread, and a fork a stray task record points at.
+    for (const [threadId, ownerId, relationshipToParent] of [
+      [nestedThreadId, childThreadId, "subagent"],
+      [forkThreadId, parentThreadId, "fork"],
+    ] as const) {
+      yield* projections.apply({
+        id: EventId.make(`event:cascade-created:${threadId}`),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: {
+          ...child,
+          id: threadId,
+          lineage: { parentThreadId: ownerId, relationshipToParent, rootThreadId: parentThreadId },
+        },
+      });
+      yield* projections.apply({
+        id: EventId.make(`event:cascade-task:${threadId}`),
+        type: "subagent.updated",
+        threadId: ownerId,
+        occurredAt: now,
+        payload: {
+          ...task,
+          id: NodeId.make(`node:cascade-task:${threadId}`),
+          threadId: ownerId,
+          runId: null,
+          origin: "provider_native",
+          childThreadId: threadId,
+        },
+      });
+    }
+
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("delete-cascade-parent"),
+      threadId: parentThreadId,
+    });
+
+    for (const threadId of [parentThreadId, childThreadId, nestedThreadId]) {
+      assert.isNotNull((yield* projections.getThread(threadId)).deletedAt, threadId);
+    }
+    assert.isNull((yield* projections.getThread(forkThreadId)).deletedAt);
+    const purged = (yield* outbox.listByCommandId(CommandId.make("delete-cascade-parent")))
+      .filter((effect) => effect.request.type === "thread-content.purge")
+      .map((effect) => effect.threadId);
+    const childPurges = yield* Effect.forEach([childThreadId, nestedThreadId], (threadId) =>
+      outbox.listByCommandId(CommandId.make(`delete-cascade-parent:subagent:${threadId}`)),
+    );
+    assert.sameMembers(
+      [
+        ...purged,
+        ...childPurges
+          .flat()
+          .filter((effect) => effect.request.type === "thread-content.purge")
+          .map((effect) => effect.threadId),
+      ],
+      [parentThreadId, childThreadId, nestedThreadId],
+    );
+  }).pipe(Effect.provide(layerTest)),
+);

@@ -6306,19 +6306,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 payload,
               );
             }
-            // T3's Full access policy is granular, under which Codex still asks before commands it
-            // deems dangerous. Managed-network asks enforce the user's allowlist, so they still ask.
-            if (
-              context.input.runtimePolicy.runtimeMode === "full-access" &&
-              context.input.runtimePolicy.approvalPolicy === undefined &&
-              context.input.runtimePolicy.sandboxPolicy === undefined &&
-              payload.networkApprovalContext == null &&
-              (payload.proposedNetworkPolicyAmendments ?? []).length === 0
-            ) {
-              return {
-                decision: "accept",
-              } satisfies CodexSchema.CommandExecutionRequestApprovalResponse;
-            }
+            // Full access's granular policy skips routine approvals; Codex still asks before
+            // commands it deems dangerous, and those asks go to the user.
             const allowance = sessionAllowance(payload.threadId, context);
             if (allowance.has("command")) {
               return {
@@ -6541,7 +6530,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               } satisfies CodexSchema.McpServerElicitationRequestResponse;
             }
 
-            if (context.input.runtimePolicy.runtimeMode === "full-access") {
+            // T3's own MCP endpoint enforces scope; other servers' and apps' asks reach the user.
+            if (
+              context.input.runtimePolicy.runtimeMode === "full-access" &&
+              (payload.serverName === "t3-code" ||
+                payload.serverName === CODEX_T3_DIRECT_MCP_SERVER)
+            ) {
               return acceptance;
             }
 

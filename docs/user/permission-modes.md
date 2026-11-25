@@ -48,9 +48,10 @@ session-wide choice, because Grok would remember that command for the whole proj
 ACP Registry agents run their own tools in their own mode; T3 Code answers their approval requests
 by the permission mode. See [ACP Registry permissions](./providers-acp.md#permissions-and-terminals).
 
-In **Full access**, commands that Codex's dangerous-command check would ask about run without
-asking. Codex still asks before network access its managed network settings don't allow, unless
-you already allowed commands for the session.
+In **Full access**, Codex runs routine commands without asking, but commands its dangerous-command
+check flags still come to you, as does network access its managed network settings don't allow,
+unless you already allowed commands for the session. Access requests from other MCP servers and apps,
+such as a browser, also come to you; T3 Code's own tools run without asking.
 
 Claude can still ask in **Full access** when its settings disable bypass permissions or require
 approval for an action. Dangerous-removal safety checks in bypass mode reject the command with
