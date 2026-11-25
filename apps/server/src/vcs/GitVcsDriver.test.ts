@@ -301,8 +301,16 @@ it.effect.each(["interrupt", "timeout", "success"] as const)(
         filter,
         `const s = require('node:net').connect(${address.port}, '127.0.0.1'); s.resume(); process.stdin.resume(); s.on('end', () => process.exit(0));`,
       );
-      yield* git(["config", "filter.barrier.clean", `"${process.execPath}" "${filter}"`]);
-      yield* git(["config", "filter.barrier.required", "true"]);
+      // Background Git ignores filters the repository's own config defines; user config still applies.
+      const userConfig = path.join(sandbox, "user.gitconfig");
+      yield* git([
+        "config",
+        "--file",
+        userConfig,
+        "filter.barrier.clean",
+        `"${process.execPath}" "${filter}"`,
+      ]);
+      yield* git(["config", "--file", userConfig, "filter.barrier.required", "true"]);
       yield* fs.writeFileString(path.join(cwd, ".gitattributes"), "z-gate filter=barrier\n");
       yield* fs.writeFileString(path.join(cwd, "z-gate"), "gate\n");
       const sharedPack = path.join(cwd, ".git/objects/pack/tmp_pack_other_operation");
@@ -313,7 +321,10 @@ it.effect.each(["interrupt", "timeout", "success"] as const)(
           run: (input) => {
             if (input.args.includes("add") && input.env?.GIT_OBJECT_DIRECTORY)
               objectDirectory = input.env.GIT_OBJECT_DIRECTORY;
-            return liveProcess.run(input);
+            return liveProcess.run({
+              ...input,
+              env: { ...input.env, GIT_CONFIG_GLOBAL: userConfig },
+            });
           },
         }),
       );
@@ -3423,6 +3434,19 @@ it.effect("git metrics count fsync fallback and transient retry subprocesses sep
       Effect.provideService(ProcessRunner.ProcessRunner, {
         run: (input) =>
           Effect.gen(function* () {
+            // The repository config read that guards `add` is not one of the counted attempts.
+            if (input.args.includes("--show-scope")) {
+              return {
+                code: ChildProcessSpawner.ExitCode(0),
+                stdout: "",
+                stderr: "",
+                timedOut: false,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                stdoutInvalidUtf8: false,
+                stderrInvalidUtf8: false,
+              };
+            }
             attempts++;
             yield* TestClock.adjust("250 millis");
             if (attempts === 2) {

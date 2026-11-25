@@ -24,6 +24,13 @@ import type { SourceControlProcessInput } from "@t3tools/source-control-core/ser
 
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import {
+  CONFIG_LISTING_MAX_OUTPUT_BYTES,
+  type ConfigListing,
+  guardGitInvocation,
+  makeRepositoryConfigPolicyCache,
+  type RepositoryConfigPolicy,
+} from "./gitRepositoryConfigGuard.ts";
 
 export interface VcsProcessInput {
   readonly operation: string;
@@ -43,6 +50,11 @@ export interface VcsProcessInput {
   readonly classifyFailure?: SourceControlProcessInput["classifyFailure"];
   readonly notFoundDetail?: string;
   readonly concurrency?: SourceControlProcessInput["concurrency"];
+  /**
+   * Only for Git commands the user started, such as commit or push: run the repository's hooks,
+   * filters and transport config. Every other Git call neutralizes them.
+   */
+  readonly trustRepositoryConfig?: boolean;
 }
 
 export interface VcsProcessOutput {
@@ -148,13 +160,20 @@ const SERVER_GIT_CONFIG = [
   ["gc.auto", "0"],
 ] as const;
 
-export const serverGitConfigEnv = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => {
+export const gitConfigEntriesEnv = (
+  env: NodeJS.ProcessEnv,
+  entries: ReadonlyArray<readonly [string, string]>,
+  platform: NodeJS.Platform,
+) => {
   const added: NodeJS.ProcessEnv = {};
-  for (const [key, value] of SERVER_GIT_CONFIG) {
+  for (const [key, value] of entries) {
     Object.assign(added, gitConfigEnv({ ...env, ...added }, key, value, platform));
   }
   return added;
 };
+
+export const serverGitConfigEnv = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) =>
+  gitConfigEntriesEnv(env, SERVER_GIT_CONFIG, platform);
 
 const REPOSITORY_SELECTORS = new Set([
   "GIT_DIR",
@@ -242,30 +261,85 @@ export const make = Effect.gen(function* () {
     return semaphore.withPermits(1);
   };
 
+  const commandEnv = (input: VcsProcessInput): NodeJS.ProcessEnv => ({
+    ...(input.command === "git" ? unsetInheritedRepositoryEnv(process.env, hostPlatform) : {}),
+    // Failures are read by English patterns; without LANG, macOS Git follows the system language.
+    // LANGUAGE leaves LC_CTYPE, which hooks inherit, alone.
+    ...(input.command === "git" ? { LANGUAGE: "C" } : {}),
+    ...input.env,
+    ...serverGitConfigEnv({ ...process.env, ...input.env }, hostPlatform),
+  });
+
+  const repositoryConfigPolicies = yield* makeRepositoryConfigPolicyCache(({ cwd, args, env }) =>
+    processRunner
+      .run({
+        command: "git",
+        args,
+        cwd,
+        env: commandEnv({
+          operation: "VcsProcess.repositoryConfig",
+          command: "git",
+          args,
+          cwd,
+          env,
+        }),
+        timeout: 10_000,
+        maxOutputBytes: CONFIG_LISTING_MAX_OUTPUT_BYTES,
+        outputMode: "truncate",
+        truncatedMarker: "",
+        timeoutBehavior: "error",
+      })
+      .pipe(
+        Effect.map((result): ConfigListing =>
+          result.code !== 0
+            ? { _tag: "Unreadable" }
+            : result.stdoutTruncated
+              ? { _tag: "Truncated" }
+              : { _tag: "Listed", stdout: result.stdout },
+        ),
+        Effect.orElseSucceed((): ConfigListing => ({ _tag: "Unreadable" })),
+      ),
+  );
+
   const spawn = Effect.fn("VcsProcess.spawn")(function* (
     input: VcsProcessInput,
     baseError: VcsProcessErrorContext,
   ) {
     let failedExit = false;
+    let args = input.args;
+    let env = commandEnv(input);
+    if (input.command === "git" && input.trustRepositoryConfig !== true) {
+      const policy: RepositoryConfigPolicy = yield* repositoryConfigPolicies.get(
+        input.spawnCwd ?? input.cwd,
+        input.args,
+        input.env,
+      );
+      const guarded = guardGitInvocation({ args, policy });
+      if (guarded._tag === "Refused") {
+        return yield* new VcsProcessExitError({
+          ...baseError,
+          exitCode: 128,
+          detail: guarded.detail,
+          failureKind: "command-failed",
+        });
+      }
+      args = guarded.args;
+      env = {
+        ...env,
+        ...guarded.env,
+        ...gitConfigEntriesEnv({ ...process.env, ...env }, guarded.config, hostPlatform),
+      };
+    }
     const execution = processRunner
       .run({
         command: input.command,
-        args: input.args,
+        args,
         cwd: input.cwd,
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
         ...(input.onStdoutChunk !== undefined ? { onStdoutChunk: input.onStdoutChunk } : {}),
         ...(input.onSpawn !== undefined ? { onSpawn: input.onSpawn } : {}),
-        env: {
-          ...(input.command === "git"
-            ? unsetInheritedRepositoryEnv(process.env, hostPlatform)
-            : {}),
-          // Failures are read by English patterns; without LANG, macOS Git follows the system language.
-          // LANGUAGE leaves LC_CTYPE, which hooks inherit, alone.
-          ...(input.command === "git" ? { LANGUAGE: "C" } : {}),
-          ...input.env,
-          ...serverGitConfigEnv({ ...process.env, ...input.env }, hostPlatform),
-        },
+        env,
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: input.outputMode ?? "truncate",

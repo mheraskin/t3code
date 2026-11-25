@@ -169,6 +169,10 @@ it.effect("runs background Git in its own lane so user commands never queue behi
     const starts = yield* Queue.unbounded<string>();
     const spawner = ChildProcessSpawner.make((command) =>
       Effect.gen(function* () {
+        // The repository config read that guards each command runs inside that command's permit.
+        if (ChildProcess.isStandardCommand(command) && command.args.includes("--show-scope")) {
+          return makeSuccessfulHandle("");
+        }
         yield* Queue.offer(
           starts,
           ChildProcess.isStandardCommand(command) ? String(command.args[0]) : "",
@@ -435,33 +439,46 @@ it.effect.each(["root", "nested", "worktree"] as const)(
       if (location === "worktree") {
         yield* git(repository, ["worktree", "add", "--detach", cwd]);
       }
-      yield* git(cwd, ["config", "filter.probe.clean", "echo clean >> .filter-runs; cat"]);
-      yield* writeTextFile(cwd, ".gitattributes", "asset.bin filter=probe\n");
-      yield* writeTextFile(cwd, ".gitignore", ".filter-runs\n");
-      yield* writeTextFile(cwd, "asset.bin", "original\n");
-      yield* git(cwd, ["add", "."]);
-      yield* git(cwd, ["commit", "-m", "filtered asset"]);
-      NodeFS.utimesSync(path.join(cwd, "asset.bin"), 1, 1);
-      const runsPath = path.join(cwd, ".filter-runs");
-      yield* fs.remove(runsPath, { force: true });
-      const indexPath = yield* git(cwd, ["rev-parse", "--git-path", "index"]);
-      const lockPath = `${path.resolve(cwd, indexPath)}.lock`;
-      yield* fs.writeFileString(lockPath, "");
-      const statusCwd = location === "nested" ? path.join(cwd, "nested") : cwd;
-      yield* fs.makeDirectory(statusCwd, { recursive: true });
+      // Background Git ignores filters the repository's own config defines; user config still applies.
+      const userConfig = path.join(yield* makeTmpDir("git-vcs-driver-user-"), "gitconfig");
+      yield* git(cwd, [
+        "config",
+        "--file",
+        userConfig,
+        "filter.probe.clean",
+        "echo clean >> .filter-runs; cat",
+      ]);
+      const env = yield* HostProcess.Environment;
+      yield* Effect.gen(function* () {
+        yield* writeTextFile(cwd, ".gitattributes", "asset.bin filter=probe\n");
+        yield* writeTextFile(cwd, ".gitignore", ".filter-runs\n");
+        yield* writeTextFile(cwd, "asset.bin", "original\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "filtered asset"]);
+        NodeFS.utimesSync(path.join(cwd, "asset.bin"), 1, 1);
+        const runsPath = path.join(cwd, ".filter-runs");
+        yield* fs.remove(runsPath, { force: true });
+        const indexPath = yield* git(cwd, ["rev-parse", "--git-path", "index"]);
+        const lockPath = `${path.resolve(cwd, indexPath)}.lock`;
+        yield* fs.writeFileString(lockPath, "");
+        const statusCwd = location === "nested" ? path.join(cwd, "nested") : cwd;
+        yield* fs.makeDirectory(statusCwd, { recursive: true });
 
-      for (let poll = 0; poll < 3; poll++) {
-        const result = yield* driver.statusDetailsLocal(statusCwd).pipe(Effect.result);
-        assert.isTrue(Result.isFailure(result));
-        if (Result.isFailure(result)) assert.include(result.failure.detail, "index is locked");
-      }
-      assert.isFalse(yield* fs.exists(runsPath));
-      assert.isTrue(yield* fs.exists(lockPath));
+        for (let poll = 0; poll < 3; poll++) {
+          const result = yield* driver.statusDetailsLocal(statusCwd).pipe(Effect.result);
+          assert.isTrue(Result.isFailure(result));
+          if (Result.isFailure(result)) assert.include(result.failure.detail, "index is locked");
+        }
+        assert.isFalse(yield* fs.exists(runsPath));
+        assert.isTrue(yield* fs.exists(lockPath));
 
-      yield* fs.remove(lockPath);
-      const status = yield* driver.statusDetailsLocal(statusCwd);
-      assert.isFalse(status.hasWorkingTreeChanges);
-      assert.include(yield* fs.readFileString(runsPath), "clean");
+        yield* fs.remove(lockPath);
+        const status = yield* driver.statusDetailsLocal(statusCwd);
+        assert.isFalse(status.hasWorkingTreeChanges);
+        assert.include(yield* fs.readFileString(runsPath), "clean");
+      }).pipe(
+        Effect.provideService(HostProcess.Environment, { ...env, GIT_CONFIG_GLOBAL: userConfig }),
+      );
     }).pipe(Effect.provide(layerTest)),
 );
 
@@ -5345,7 +5362,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             if (
               ChildProcess.isStandardCommand(command) &&
               command.args[0] === "config" &&
-              !command.args.includes("status.showUntrackedFiles")
+              !command.args.includes("status.showUntrackedFiles") &&
+              !command.args.includes("--show-scope")
             ) {
               if (!(yield* Ref.getAndSet(renameClaimed, true))) {
                 yield* git(cwd, ["branch", "-m", "t3/temporary", "feature/named"]).pipe(
@@ -6512,8 +6530,12 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
                   : "";
               const later =
                 transfer === "followed by a push" ? "" : "| dd bs=1 count=50000 2>/dev/null";
+              // Background Git refuses transports the repository's own config names; user config may.
+              const userConfig = path.join(yield* makeTmpDir("git-vcs-driver-user-"), "gitconfig");
               yield* git(cwd, [
                 "config",
+                "--file",
+                userConfig,
                 "remote.origin.uploadpack",
                 `f() { if [ -e '${served}' ]; then git upload-pack "$@" ${later}; else : > '${served}'; git upload-pack "$@"; ${push} fi; }; f`,
               ]);
@@ -6521,7 +6543,15 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
               const objects = path.join(cwd, ".git", "objects");
               NodeFS.writeFileSync(path.join(objects, "pack", "tmp_pack_other"), "another fetch");
 
-              const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsRemote(cwd);
+              const env = yield* HostProcess.Environment;
+              const status = yield* (yield* GitVcsDriver.GitVcsDriver)
+                .statusDetailsRemote(cwd)
+                .pipe(
+                  Effect.provideService(HostProcess.Environment, {
+                    ...env,
+                    GIT_CONFIG_GLOBAL: userConfig,
+                  }),
+                );
 
               assert.equal(status.behindCount, behindCount);
               assert.deepEqual(

@@ -22,6 +22,28 @@ import * as VcsProcess from "./VcsProcess.ts";
 
 const encodeExitError = Schema.encodeEffect(Schema.fromJsonString(VcsProcessExitError));
 
+// The repository config read that guards Git commands; these fakes stand in for other commands.
+const isConfigListing = (input: ProcessRunner.ProcessRunInput) =>
+  input.args.includes("config") && input.args.includes("--show-scope");
+
+const configListingResult = Effect.succeed({
+  stdout: "",
+  stderr: "",
+  code: ChildProcessSpawner.ExitCode(0),
+  timedOut: false,
+  stdoutTruncated: false,
+  stderrTruncated: false,
+  stdoutInvalidUtf8: false,
+  stderrInvalidUtf8: false,
+});
+
+const answeringConfigListing = (
+  run: ProcessRunner.ProcessRunner["Service"]["run"],
+): ProcessRunner.ProcessRunner["Service"] =>
+  ProcessRunner.ProcessRunner.of({
+    run: (input) => (isConfigListing(input) ? configListingResult : run(input)),
+  });
+
 const run = (input: VcsProcess.VcsProcessInput) =>
   Effect.gen(function* () {
     const process = yield* VcsProcess.VcsProcess;
@@ -46,7 +68,7 @@ const captureProcessResult = (
   VcsProcess.make.pipe(
     Effect.provideService(
       ProcessRunner.ProcessRunner,
-      ProcessRunner.ProcessRunner.of({ run: () => result }),
+      answeringConfigListing(() => result),
     ),
     Effect.flatMap((service) => service.run(baseInput)),
     Effect.flip,
@@ -156,27 +178,26 @@ describe("VcsProcess.run", () => {
       const service = yield* VcsProcess.make.pipe(
         Effect.provideService(
           ProcessRunner.ProcessRunner,
-          ProcessRunner.ProcessRunner.of({
-            run: (input) =>
-              Effect.sync(() => {
-                attempts += 1;
-                return {
-                  stdout: "",
-                  stderr:
-                    attempts % 2 === 0
-                      ? ""
-                      : input.env?.LANGUAGE === "C"
-                        ? "fatal: Unable to create '/private/repo/.git/index.lock': File exists.\n"
-                        : "致命錯誤: 無法建立「/private/repo/.git/index.lock」：File exists。\n",
-                  code: ChildProcessSpawner.ExitCode(attempts % 2 === 0 ? 0 : 128),
-                  timedOut: false,
-                  stdoutTruncated: false,
-                  stderrTruncated: false,
-                  stdoutInvalidUtf8: false,
-                  stderrInvalidUtf8: false,
-                };
-              }),
-          }),
+          answeringConfigListing((input) =>
+            Effect.sync(() => {
+              attempts += 1;
+              return {
+                stdout: "",
+                stderr:
+                  attempts % 2 === 0
+                    ? ""
+                    : input.env?.LANGUAGE === "C"
+                      ? "fatal: Unable to create '/private/repo/.git/index.lock': File exists.\n"
+                      : "致命錯誤: 無法建立「/private/repo/.git/index.lock」：File exists。\n",
+                code: ChildProcessSpawner.ExitCode(attempts % 2 === 0 ? 0 : 128),
+                timedOut: false,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                stdoutInvalidUtf8: false,
+                stderrInvalidUtf8: false,
+              };
+            }),
+          ),
         ),
       );
 
@@ -248,8 +269,9 @@ describe("VcsProcess.run", () => {
             HostProcess.Platform,
             "platform" in scenario ? scenario.platform : "darwin",
           ),
-          Effect.provideService(ProcessRunner.ProcessRunner, {
-            run: (input) =>
+          Effect.provideService(
+            ProcessRunner.ProcessRunner,
+            answeringConfigListing((input) =>
               Effect.sync(() => {
                 seen.push(input.args);
                 const failed =
@@ -266,7 +288,8 @@ describe("VcsProcess.run", () => {
                   stderrInvalidUtf8: false,
                 };
               }),
-          }),
+            ),
+          ),
         );
         const exit = yield* service
           .run({

@@ -48,7 +48,18 @@ import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observabil
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { removeEmptyDirectory, type RemoveEmptyDirectoryError } from "./removeEmptyDirectory.ts";
 import { VcsAutomaticFetchInterval } from "./VcsAutomaticFetchInterval.ts";
-import { gitConfigEnv, serverGitConfigEnv, unsetInheritedRepositoryEnv } from "./VcsProcess.ts";
+import {
+  gitConfigEntriesEnv,
+  gitConfigEnv,
+  serverGitConfigEnv,
+  unsetInheritedRepositoryEnv,
+} from "./VcsProcess.ts";
+import {
+  CONFIG_LISTING_MAX_OUTPUT_BYTES,
+  type ConfigListing,
+  guardGitInvocation,
+  makeRepositoryConfigPolicyCache,
+} from "./gitRepositoryConfigGuard.ts";
 import { makeWorktreeCheckoutCache } from "./worktreeCheckoutCache.ts";
 import { removeLinkedWorktree } from "./worktreeRemoval.ts";
 import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";
@@ -144,6 +155,30 @@ const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
   SSH_ASKPASS: "",
   SSH_ASKPASS_REQUIRE: "never",
 } satisfies NodeJS.ProcessEnv);
+// Commands the user starts run with the repository's hooks, filters and transport config, as Git
+// in a terminal would; every other call neutralizes them (see gitRepositoryConfigGuard.ts).
+const USER_STARTED_OPERATIONS = new Set([
+  "GitVcsDriver.commit.addAll",
+  "GitVcsDriver.commit.addSelected",
+  "GitVcsDriver.commit.commit",
+  "GitVcsDriver.pushCurrentBranch.push",
+  "GitVcsDriver.pushCurrentBranch.pushOwnBranch",
+  "GitVcsDriver.pushCurrentBranch.pushUpstream",
+  "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote",
+  "GitVcsDriver.pushCurrentBranch.pushWithUpstream",
+  "GitVcsDriver.pullCurrentBranch.pull",
+  "GitVcsDriver.switchRef.checkout",
+  "GitVcsDriver.createWorktree",
+  "GitVcsDriver.createWorktree.checkout",
+  "GitVcsDriver.createWorktree.postCheckout",
+  "GitVcsDriver.createWorktree.initSubmodules",
+  "GitVcsDriver.createWorktree.updateSubmodules",
+  "GitVcsDriver.fetchRemote",
+  "GitVcsDriver.fetchRemoteBranch.fetch",
+  "GitVcsDriver.fetchRefCommit",
+  "GitVcsDriver.fetchRefIntoBranch",
+  "GitVcsDriver.fetchWorktreeBaseCommit",
+]);
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
 const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetails>({
@@ -230,6 +265,7 @@ interface ExecuteGitOptions {
   keepLineCallbacksAfterTruncation?: boolean | undefined;
   progress?: GitVcsDriver.ExecuteGitProgress | undefined;
   writesSharedConfig?: boolean | undefined;
+  trustRepositoryConfig?: boolean | undefined;
 }
 
 function parseBranchAb(value: string): { ahead: number; behind: number } {
@@ -1135,7 +1171,29 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ...input.env,
           ...trace2Monitor.env,
         };
-        const env = { ...baseEnv, ...serverGitConfigEnv(baseEnv, hostPlatform) };
+        const serverEnv = { ...baseEnv, ...serverGitConfigEnv(baseEnv, hostPlatform) };
+        let args = commandInput.args;
+        let env = serverEnv;
+        if (input.trustRepositoryConfig !== true && !USER_STARTED_OPERATIONS.has(input.operation)) {
+          const policy = yield* repositoryConfigPolicies.get(
+            commandInput.cwd,
+            commandInput.args,
+            input.env,
+          );
+          const guarded = guardGitInvocation({ args, policy });
+          if (guarded._tag === "Refused") {
+            return yield* new GitCommandError({
+              ...gitCommandContext(commandInput),
+              detail: guarded.detail,
+            });
+          }
+          args = guarded.args;
+          env = {
+            ...serverEnv,
+            ...guarded.env,
+            ...gitConfigEntriesEnv(serverEnv, guarded.config, hostPlatform),
+          };
+        }
         const spawnEnv = { ...env, ...windowsLongPathConfigEnv(hostPlatform, env) };
         const resolved = yield* resolveSpawnCommand("git", [], { env: spawnEnv });
         const spawnError = (cause: unknown) =>
@@ -1148,12 +1206,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         const executable = resolved.shell ? "git" : resolved.command;
         const child = yield* commandSpawner
           .spawn(
-            ChildProcess.make(executable, commandInput.args, {
+            ChildProcess.make(executable, args, {
               cwd: commandInput.cwd,
               env: spawnEnv,
               // SIGTERM first lets git remove its lock files; SIGKILL ends one that ignores it.
               forceKillAfter: "1 second",
-              ...(runsGitWithoutConsole(hostPlatform, executable, commandInput.args)
+              ...(runsGitWithoutConsole(hostPlatform, executable, args)
                 ? { detached: true, windowsHide: true }
                 : {}),
             }),
@@ -1230,7 +1288,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         } satisfies GitVcsDriver.ExecuteGitResult;
       });
 
-      const execution = runGitCommand().pipe(Effect.scoped);
+      const execution = USER_STARTED_OPERATIONS.has(input.operation)
+        ? // A checkout or pull can bring in a file the repository config includes.
+          runGitCommand().pipe(
+            Effect.scoped,
+            Effect.ensuring(Effect.suspend(() => repositoryConfigPolicies.invalidateAll)),
+          )
+        : runGitCommand().pipe(Effect.scoped);
       if (timeoutMs === null) {
         return yield* execution;
       }
@@ -1249,6 +1313,28 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ),
       );
     },
+  );
+
+  const repositoryConfigPolicies = yield* makeRepositoryConfigPolicyCache(({ cwd, args, env }) =>
+    executeRaw({
+      operation: "GitVcsDriver.repositoryConfig",
+      cwd,
+      args,
+      env,
+      allowNonZeroExit: true,
+      timeoutMs: 10_000,
+      maxOutputBytes: CONFIG_LISTING_MAX_OUTPUT_BYTES,
+      trustRepositoryConfig: true,
+    }).pipe(
+      Effect.map((result): ConfigListing =>
+        result.exitCode !== 0
+          ? { _tag: "Unreadable" }
+          : result.stdoutTruncated
+            ? { _tag: "Truncated" }
+            : { _tag: "Listed", stdout: result.stdout },
+      ),
+      Effect.orElseSucceed((): ConfigListing => ({ _tag: "Unreadable" })),
+    ),
   );
 
   const sharedConfigLocks = new Map<string, Semaphore.Semaphore>();
@@ -1325,6 +1411,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         : {}),
       ...(options.progress ? { progress: options.progress } : {}),
       ...(options.writesSharedConfig ? { writesSharedConfig: true } : {}),
+      ...(options.trustRepositoryConfig ? { trustRepositoryConfig: true } : {}),
     }).pipe(
       Effect.flatMap((result) => {
         if (options.allowNonZeroExit || result.exitCode === 0) {

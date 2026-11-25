@@ -68,6 +68,11 @@ export interface ExecuteGitInput {
   readonly progress?: ExecuteGitProgress;
   /** Writes .git/config, which every worktree shares and Git locks without waiting. */
   readonly writesSharedConfig?: boolean;
+  /**
+   * Only for Git commands the user started, such as commit or push: run the repository's hooks,
+   * filters and transport config. Every other Git call neutralizes them.
+   */
+  readonly trustRepositoryConfig?: boolean;
 }
 
 export interface ExecuteGitResult {
