@@ -26,7 +26,6 @@ import { createEnvironmentCommand } from "./runtime.ts";
 
 const MINT_TIMEOUT_MS = 8_000;
 const PEER_PAIRING_CODE_LABEL = "T3 Code link";
-const MCP_APPROVAL_CODE_LABEL = "App sign-in";
 
 /** Minting failed; the user can still paste a code from the other environment. */
 export class PeerPairingCodeError extends Schema.TaggedError<PeerPairingCodeError>()(
@@ -123,19 +122,5 @@ export function createPeerPairingCodeCommand<R, E>(
         ),
         Effect.map((minted) => minted.credential),
       ),
-  });
-}
-
-/**
- * Mints a hidden code that approves one app's sign-in at `access`, and only that. Servers
- * without `mcpApprovalCodes` ignore the level, so check the capability first.
- */
-export function createMcpApprovalCodeCommand<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
-) {
-  return createEnvironmentCommand(runtime, {
-    label: "environment-data:mcp-approval-code:mint",
-    execute: (access: AuthMcpClientAccess) =>
-      mintOnEnvironment({ label: MCP_APPROVAL_CODE_LABEL, access }),
   });
 }

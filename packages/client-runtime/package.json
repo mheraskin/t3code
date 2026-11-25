@@ -147,10 +147,6 @@
       "types": "./src/authorization/index.ts",
       "default": "./src/authorization/index.ts"
     },
-    "./connect-device-notices": {
-      "types": "./src/connectDeviceNotices.ts",
-      "default": "./src/connectDeviceNotices.ts"
-    },
     "./environment": {
       "types": "./src/environment/index.ts",
       "default": "./src/environment/index.ts"
@@ -319,10 +315,6 @@
       "types": "./src/state/environmentHttpAuth.ts",
       "default": "./src/state/environmentHttpAuth.ts"
     },
-    "./state/connectMcpApproval": {
-      "types": "./src/state/connectMcpApproval.ts",
-      "default": "./src/state/connectMcpApproval.ts"
-    },
     "./state/peerPairingCode": {
       "types": "./src/state/peerPairingCode.ts",
       "default": "./src/state/peerPairingCode.ts"
@@ -350,10 +342,6 @@
     "./state/project-grouping": {
       "types": "./src/state/projectGrouping.ts",
       "default": "./src/state/projectGrouping.ts"
-    },
-    "./state/relay": {
-      "types": "./src/state/relayDiscovery.ts",
-      "default": "./src/state/relayDiscovery.ts"
     },
     "./state/review": {
       "types": "./src/state/review.ts",

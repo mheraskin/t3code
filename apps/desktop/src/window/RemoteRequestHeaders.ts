@@ -8,7 +8,6 @@ const REMOTE_REQUEST_URL_PATTERNS = ["http://*/*", "https://*/*", "ws://*/*", "w
 export interface MainWindowRequestHeaderPolicy {
   readonly desktopOrigin: string;
   readonly mainWebContentsId: number;
-  readonly clerkFrontendApiHostname?: string | undefined;
   readonly devServerOrigin?: string | undefined;
   readonly isDevelopment: boolean;
 }
@@ -71,12 +70,6 @@ function hasExactDesktopOriginHeader(
 
 function shouldPreserveOriginHeader(policy: MainWindowRequestHeaderPolicy, url: URL): boolean {
   const hostname = normalizeHostname(url.hostname);
-  if (
-    policy.clerkFrontendApiHostname !== undefined &&
-    hostname === normalizeHostname(policy.clerkFrontendApiHostname)
-  ) {
-    return true;
-  }
   if (!policy.isDevelopment) return false;
   if (policy.devServerOrigin !== undefined && toHttpOrigin(url) === policy.devServerOrigin) {
     return true;

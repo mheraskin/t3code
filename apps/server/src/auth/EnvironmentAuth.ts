@@ -1831,10 +1831,9 @@ const revokePairedClientsThePolicyDisallows = Effect.fn(
   },
 ) {
   const remoteAllowed = ManagedLimits.allowsRemoteClients(policy);
-  const disallowed = new Set<string>();
+  // T3 Connect is removed from this build, so devices it paired before always lose access.
+  const disallowed = new Set<string>([LINK_PAIRED_SUBJECTS.connect]);
   if (!remoteAllowed) disallowed.add(LINK_PAIRED_SUBJECTS.link);
-  if (!ManagedLimits.allowsConnect(policy)) disallowed.add(LINK_PAIRED_SUBJECTS.connect);
-  if (disallowed.size === 0) return;
   const sessions = (yield* stores.sessions.listActive()).filter(
     (session) =>
       disallowed.has(session.subject) ||

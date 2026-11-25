@@ -39,7 +39,6 @@ import {
 } from "../attachmentStore.ts";
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { CloudManagedEndpointRuntime } from "../cloud/ManagedEndpointRuntime.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -80,15 +79,7 @@ const layerOrchestration = Layer.mergeAll(
 
 // The Connect hostname the fake tunnel reports. Tests set it to null to simulate an unlink.
 const hostname = Ref.makeUnsafe<string | null>("env.t3.test");
-const layerConnect = Layer.mock(CloudManagedEndpointRuntime)({
-  inspectConnector: Effect.map(Ref.get(hostname), (value) => ({
-    pid: 1,
-    readyConnections: 1,
-    hostname: value,
-    origin: null,
-    protocol: "http2",
-  })),
-});
+const layerConnect = Layer.succeed(GuestShareService.GuestShareHost, Ref.get(hostname));
 const layerProviders = Layer.mock(ProviderRegistry.ProviderRegistry)({
   getProviders: Effect.succeed([]),
 });

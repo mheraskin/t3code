@@ -52,9 +52,7 @@ const listedPaths = (command: Command.Command.Any, path: string): ReadonlyArray<
 ];
 
 it("feedback subjects name every listed t3 command", () => {
-  expect([...T3_CLI_COMMANDS].sort()).toEqual(
-    [...listedPaths(makeCli({ cloudEnabled: true }), "t3")].sort(),
-  );
+  expect([...T3_CLI_COMMANDS].sort()).toEqual([...listedPaths(makeCli(), "t3")].sort());
 });
 
 const hidden = (tool: string) =>

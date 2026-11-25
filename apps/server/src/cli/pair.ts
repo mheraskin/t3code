@@ -67,7 +67,7 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
     checkedStatePaths: Schema.Array(Schema.String),
     inLinkedWorktree: Schema.Boolean,
     serveCommand: Schema.String,
-    connectCommand: Schema.String,
+    upCommand: Schema.String,
   },
 ) {
   override get message(): string {
@@ -77,7 +77,7 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
       ...(this.inLinkedWorktree
         ? ["In a linked worktree, pass --base-dir to pair with a server outside it."]
         : []),
-      `Start one with \`${this.serveCommand}\`, or connect this machine with T3 Connect: \`${this.connectCommand}\`.`,
+      `Start one with \`${this.serveCommand}\`, or run it in the background: \`${this.upCommand}\`.`,
     ].join("\n");
   }
 }
@@ -327,7 +327,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
     checkedStatePaths,
     inLinkedWorktree,
     serveCommand: (yield* resolveHostCliCommand("serve", baseDirArgs)).command,
-    connectCommand: (yield* resolveHostCliCommand("connect", baseDirArgs)).command,
+    upCommand: (yield* resolveHostCliCommand("up", baseDirArgs)).command,
   });
 });
 
@@ -588,7 +588,7 @@ export const pairCommand = Command.make("pair", {
           );
         } else if (target.state.privateNetworkOnly) {
           notes.push(
-            "This URL works only from this machine's local network. From elsewhere, re-run with --tailscale or use T3 Connect.",
+            "This URL works only from this machine's local network. From elsewhere, re-run with --tailscale.",
           );
         }
         if (target.variant === "dev" && target.state.devUrl === undefined) {

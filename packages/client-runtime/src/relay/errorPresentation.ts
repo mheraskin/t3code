@@ -1,9 +1,5 @@
 import type { DpopFailureReason } from "@t3tools/contracts";
-import {
-  T3CHAT_PLAN_TUNNEL_LIMITS,
-  type RelayEnvironmentStatusResponse,
-  type RelayProtectedError,
-} from "@t3tools/contracts/relay";
+import { T3CHAT_PLAN_TUNNEL_LIMITS, type RelayProtectedError } from "@t3tools/contracts/relay";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
@@ -141,7 +137,7 @@ export function relayProtectedErrorMessage(
 
 // The relay cuts off a request it cannot finish in time with a 504 that no
 // endpoint declares, so the client sees only the status.
-export const RELAY_GATEWAY_TIMEOUT_MESSAGE = msg(
+const RELAY_GATEWAY_TIMEOUT_MESSAGE = msg(
   "Relay timed out before it finished the request (HTTP 504). Try again in a few minutes. If it keeps failing, copy the trace ID when you report it.",
 );
 
@@ -154,31 +150,4 @@ export function relayRequestFailureText(error: {
   if (error.status !== undefined)
     return [msg("Relay returned an unexpected HTTP {status}.", { status: error.status })];
   return null;
-}
-
-export function relayRequestFailureDetail(
-  error: {
-    readonly relayError?: RelayProtectedError | undefined;
-    readonly status?: number | undefined;
-  },
-  resolve: MFunctionType = mFallback,
-): string | null {
-  const text = relayRequestFailureText(error);
-  return text === null ? null : resolveMarkedText(text, resolve);
-}
-
-export function relayOfflineReasonMessage(
-  status: Pick<RelayEnvironmentStatusResponse, "offlineReason">,
-  resolve: MFunctionType = mFallback,
-): string | null {
-  switch (status.offlineReason) {
-    case "tunnel_released":
-      return resolve(
-        msg(
-          "Offline for a while, so its T3 Connect tunnel was removed. Start T3 Code on that computer and update it to the latest version to reconnect.",
-        ),
-      );
-    case undefined:
-      return null;
-  }
 }

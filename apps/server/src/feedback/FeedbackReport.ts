@@ -198,13 +198,6 @@ export const T3_CLI_COMMANDS: ReadonlyArray<string> = [
   "t3 policy templates",
   "t3 policy settings",
   "t3 triage",
-  "t3 connect",
-  "t3 connect link",
-  "t3 connect login",
-  "t3 connect logout",
-  "t3 connect publish",
-  "t3 connect status",
-  "t3 connect unlink",
 ];
 
 export type FeedbackInput = typeof FeedbackInput.Type;

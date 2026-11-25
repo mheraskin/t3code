@@ -1,18 +1,11 @@
 import { ClientCapabilities, PlatformConnectionSource } from "@t3tools/client-runtime/platform";
-import {
-  ConnectionBlockedError,
-  ConnectionTransientError,
-  Connectivity,
-  Wakeups,
-} from "@t3tools/client-runtime/connection";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
+import { ConnectionBlockedError, Connectivity, Wakeups } from "@t3tools/client-runtime/connection";
 import * as Clock from "effect/Clock";
 import { msg } from "gt-react-native";
 import { m } from "../i18n/messages";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import Constants from "expo-constants";
@@ -21,8 +14,6 @@ import { AppState } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
-import * as MobileStorage from "../persistence/mobile-storage";
-import { appAtomRegistry } from "../state/atom-registry";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
 import * as EnvironmentOwnedDataCleanup from "./environment-owned-data-cleanup";
 import * as ConnectionStorage from "./storage";
@@ -137,118 +128,77 @@ const layerWakeups = Wakeups.layer({
           (subscription) => Effect.sync(() => subscription.remove()),
         ).pipe(Effect.asVoid),
       ),
-      managedRelayAccountChanges(appAtomRegistry).pipe(
-        Stream.map(() => "credentials-changed" as const),
-      ),
       networkPathChanges,
     ],
     { concurrency: "unbounded" },
   ),
 });
 
-const layerCapabilities = Layer.effectContext(
-  Effect.gen(function* () {
-    const storage = yield* MobileStorage.MobileStorage;
-    return Context.make(
-      ClientCapabilities.CloudSession,
-      ClientCapabilities.CloudSession.of({
-        identity: Effect.sync(() =>
-          Option.fromNullishOr(appAtomRegistry.get(managedRelaySessionAtom)),
-        ),
-        clerkToken: Effect.gen(function* () {
-          const session = appAtomRegistry.get(managedRelaySessionAtom);
-          if (session === null) {
-            return yield* new ConnectionBlockedError({
-              reason: "authentication",
-              detail: m(
-                msg("Sign in to {product} to connect this environment.", { product: "T3 Connect" }),
-              ),
-            });
-          }
-          const token = yield* session.readClerkToken().pipe(
-            Effect.mapError(
-              (error) =>
-                new ConnectionTransientError({
-                  reason: "network",
-                  detail: error.message,
-                }),
-            ),
-          );
-          if (token === null) {
-            return yield* new ConnectionBlockedError({
-              reason: "authentication",
-              detail: m(msg("The {product} session is unavailable.", { product: "T3 Connect" })),
-            });
-          }
-          return token;
+const layerCapabilities = Layer.succeedContext(
+  Context.make(
+    ClientCapabilities.CloudSession,
+    ClientCapabilities.CloudSession.of({
+      // T3 Connect is removed, so there is never a cloud session to connect through.
+      identity: Effect.succeedNone,
+      clerkToken: Effect.fail(
+        new ConnectionBlockedError({
+          reason: "unsupported",
+          detail: m(msg("{product} is not available in this build.", { product: "T3 Connect" })),
         }),
+      ),
+    }),
+  ).pipe(
+    Context.add(
+      ClientCapabilities.PrimaryEnvironmentAuth,
+      ClientCapabilities.PrimaryEnvironmentAuth.of({
+        bearerToken: Effect.succeedNone,
       }),
-    ).pipe(
-      Context.add(
-        ClientCapabilities.PrimaryEnvironmentAuth,
-        ClientCapabilities.PrimaryEnvironmentAuth.of({
-          bearerToken: Effect.succeedNone,
-        }),
-      ),
-      Context.add(
-        ClientCapabilities.RelayDeviceIdentity,
-        ClientCapabilities.RelayDeviceIdentity.of({
-          deviceId: storage.loadOrCreateAgentAwarenessDeviceId.pipe(
-            Effect.mapError(
-              (cause) =>
-                new ConnectionTransientError({
-                  reason: "remote-unavailable",
-                  detail: m(
-                    msg("Could not load the mobile device identity: {cause}", {
-                      cause: String(cause),
-                    }),
-                  ),
+    ),
+    Context.add(
+      ClientCapabilities.RelayDeviceIdentity,
+      ClientCapabilities.RelayDeviceIdentity.of({
+        deviceId: Effect.succeedNone,
+      }),
+    ),
+    Context.add(
+      ClientCapabilities.ClientPresentation,
+      ClientCapabilities.ClientPresentation.of({
+        metadata: authClientMetadata(Constants.expoConfig?.version),
+      }),
+    ),
+    Context.add(
+      ClientCapabilities.SshEnvironmentGateway,
+      ClientCapabilities.SshEnvironmentGateway.of({
+        provision: Effect.fn("ClientCapabilities.SshEnvironmentGateway.provision")(() =>
+          Effect.fail(
+            new ConnectionBlockedError({
+              reason: "unsupported",
+              detail: m(
+                msg("{feature} environments are only available in the desktop app.", {
+                  feature: "SSH",
                 }),
-            ),
-            Effect.asSome,
+              ),
+            }),
           ),
-        }),
-      ),
-      Context.add(
-        ClientCapabilities.ClientPresentation,
-        ClientCapabilities.ClientPresentation.of({
-          metadata: authClientMetadata(Constants.expoConfig?.version),
-        }),
-      ),
-      Context.add(
-        ClientCapabilities.SshEnvironmentGateway,
-        ClientCapabilities.SshEnvironmentGateway.of({
-          provision: Effect.fn("ClientCapabilities.SshEnvironmentGateway.provision")(() =>
-            Effect.fail(
-              new ConnectionBlockedError({
-                reason: "unsupported",
-                detail: m(
-                  msg("{feature} environments are only available in the desktop app.", {
-                    feature: "SSH",
-                  }),
-                ),
-              }),
-            ),
+        ),
+        prepare: Effect.fn("ClientCapabilities.SshEnvironmentGateway.prepare")(() =>
+          Effect.fail(
+            new ConnectionBlockedError({
+              reason: "unsupported",
+              detail: m(
+                msg("{feature} environments are only available in the desktop app.", {
+                  feature: "SSH",
+                }),
+              ),
+            }),
           ),
-          prepare: Effect.fn("ClientCapabilities.SshEnvironmentGateway.prepare")(() =>
-            Effect.fail(
-              new ConnectionBlockedError({
-                reason: "unsupported",
-                detail: m(
-                  msg("{feature} environments are only available in the desktop app.", {
-                    feature: "SSH",
-                  }),
-                ),
-              }),
-            ),
-          ),
-          disconnect: Effect.fn("ClientCapabilities.SshEnvironmentGateway.disconnect")(
-            () => Effect.void,
-          ),
-        }),
-      ),
-    );
-  }),
+        ),
+        disconnect: Effect.fn("ClientCapabilities.SshEnvironmentGateway.disconnect")(
+          () => Effect.void,
+        ),
+      }),
+    ),
+  ),
 );
 
 const layerPlatformConnectionSource = Layer.succeed(
@@ -259,7 +209,7 @@ const layerPlatformConnectionSource = Layer.succeed(
 );
 
 const layerProvidedConnectionStorage = ConnectionStorage.layer.pipe(Layer.provide(Runtime.layer));
-const layerProvidedCapabilities = layerCapabilities.pipe(Layer.provide(Runtime.layer));
+const layerProvidedCapabilities = layerCapabilities;
 
 type ConnectionPlatformLayerSource =
   | typeof layerProvidedConnectionStorage

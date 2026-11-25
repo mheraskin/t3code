@@ -4,38 +4,27 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 
 import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 
-import * as Dpop from "../features/cloud/dpop";
-import * as ManagedRelayLayer from "../features/cloud/managedRelayLayer";
-import { resolveCloudPublicConfig } from "../features/cloud/publicConfig";
-import * as Tracing from "../features/observability/tracing";
 import * as NativeWebSocket from "../native/nativeWebSocket";
 import * as Persistence from "../persistence/layer";
 import { disposeOnFoundationReplace, type FoundationHotModule } from "./foundation-fast-refresh";
+import * as NativeCrypto from "./nativeCrypto";
 import { whenProtectedDataAvailable } from "./protectedData";
+import * as RelayDisabled from "./relayDisabled";
 
 declare const module: { readonly hot?: FoundationHotModule } | undefined;
-
-function configuredRelayUrl(): string {
-  return resolveCloudPublicConfig().relay.url ?? "http://relay.invalid";
-}
 
 const layerHttpClient = layerRemoteHttpClient(fetch);
 
 type RuntimeLayerSource =
-  | ReturnType<typeof ManagedRelayLayer.layer>
+  | typeof RelayDisabled.layer
   | typeof NativeWebSocket.layer
-  | typeof Dpop.layer
+  | typeof NativeCrypto.layer
   | typeof layerHttpClient
-  | typeof Persistence.layer
-  | typeof Tracing.layer;
+  | typeof Persistence.layer;
 
-const layerRuntime = Layer.merge(
-  ManagedRelayLayer.layer(configuredRelayUrl()),
-  NativeWebSocket.layer,
-).pipe(
-  Layer.provideMerge(Dpop.layer),
+const layerRuntime = Layer.mergeAll(RelayDisabled.layer, NativeWebSocket.layer).pipe(
+  Layer.provideMerge(NativeCrypto.layer),
   Layer.provideMerge(layerHttpClient),
-  Layer.provideMerge(Tracing.layer.pipe(Layer.provide(layerHttpClient))),
   Layer.provideMerge(Persistence.layer),
   // These layers read the keychain and the database while they build, and a
   // failed build is kept for the life of the process.

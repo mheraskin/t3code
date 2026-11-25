@@ -12,17 +12,15 @@ import {
 import { AuthAccessReadScope, AuthAccessWriteScope, type EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { Atom } from "effect/reactivity";
-import { useContext, useEffect, useEffectEvent } from "react";
+import { useContext, useEffect } from "react";
 
 import { useNowMinute } from "../hooks/useNowMinute";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentAtomList, environmentIdsKey } from "./environmentAtomList";
 import { useEnvironmentIdentities, useEnvironments } from "./environments";
 import { environmentPresentations } from "./presentation";
-import { relayEnvironmentDiscovery } from "./relay";
 import { useEnvironmentQuery } from "./query";
 import { useEnvironmentsWithScope } from "./session";
-import { useAtomCommand } from "./use-atom-command";
 
 export const peerLinkEnvironment = createPeerLinkEnvironmentAtoms(connectionAtomRuntime);
 
@@ -82,26 +80,16 @@ export function usePeerLinkHosts() {
   return supported.filter((environment) => readable.has(environment.environmentId));
 }
 
+// Privacy fork: T3 Connect is removed, so no machine is known only through the relay.
+const NO_CONNECT_MACHINES = new Map<string, never>();
+
 /**
- * The user's other machines, for picking one to link `environmentId` to,
- * including those only on their T3 Connect account. Reads that environment's
- * links only while `enabled`, since listing them asks every linked machine
+ * The user's other machines, for picking one to link `environmentId` to. Reads that
+ * environment's links only while `enabled`, since listing them asks every linked machine
  * whether it answers.
  */
 export function useLinkableMachines(environmentId: EnvironmentId, enabled: boolean) {
   const { environments } = useEnvironments();
-  const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
-  const refreshDiscovery = useAtomCommand(relayEnvironmentDiscovery.refresh, {
-    reportFailure: false,
-  });
-  // Connect hosts are listed only once something asked for them, so ask on open.
-  const discoverIfUnasked = useEffectEvent(() => {
-    if (discovery.environments.size === 0 && !discovery.refreshing) void refreshDiscovery();
-  });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- discovery follows the picker's visibility, which a card's mount or a dialog's open sets
-  useEffect(() => {
-    if (enabled) discoverIfUnasked();
-  }, [enabled]);
   const links = useEnvironmentQuery(
     enabled ? peerLinkEnvironment.list({ environmentId, input: {} }) : null,
   );
@@ -109,7 +97,7 @@ export function useLinkableMachines(environmentId: EnvironmentId, enabled: boole
     environments,
     threadEnvironmentId: environmentId,
     links: links.data?.links ?? [],
-    connect: discovery.environments,
+    connect: NO_CONNECT_MACHINES,
   });
 }
 
@@ -156,13 +144,12 @@ export function useLinkBackOffers(
   enabled: boolean,
 ) {
   const { environments } = useEnvironments();
-  const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
   const writable = useEnvironmentsWithScope(environments, AuthAccessWriteScope);
   const source = linkableMachines({
     environments,
     threadEnvironmentId: null,
     links: [],
-    connect: discovery.environments,
+    connect: NO_CONNECT_MACHINES,
   }).find((machine) => machine.environmentId === sourceId);
   const wanted = new Set(targetIds);
   const targets = environments.filter((environment) => wanted.has(environment.environmentId));

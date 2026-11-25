@@ -1,9 +1,7 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
@@ -27,15 +25,6 @@ type RelayClientEntry = typeof RelayClientEntry.Type;
 const RelayClientEntryJson = Schema.fromJsonString(RelayClientEntry);
 const decodeEntry = Schema.decodeUnknownOption(RelayClientEntryJson);
 const encodeEntry = Schema.encodeEffect(RelayClientEntryJson);
-
-/** Remembers running relay clients so a server can stop the ones a crashed server left behind. */
-export class RelayClientLedger extends Context.Service<
-  RelayClientLedger,
-  {
-    /** Records a started relay client; the returned effect forgets it once it has stopped. */
-    readonly track: (pid: number) => Effect.Effect<Effect.Effect<void>>;
-  }
->()("t3/cloud/RelayClientLedger") {}
 
 const ENTRY_DIRECTORY = "relay-clients";
 const ENTRY_FILE = /^\d+\.json$/;
@@ -154,8 +143,9 @@ export const make = Effect.fn("RelayClientLedger.make")(function* (input: {
       ? undefined
       : { pid: ownerProcess.pid, startTime: ownerProcess.startTime };
 
-  const track: RelayClientLedger["Service"]["track"] = Effect.fn("RelayClientLedger.track")(
-    function* (pid) {
+  /** Records a started relay client; the returned effect forgets it once it has stopped. */
+  const track = Effect.fn("RelayClientLedger.track")(
+    function* (pid: number) {
       if (!recordable) return Effect.void;
       const client = yield* identify(pid);
       if (owner === undefined || client?.command === undefined) {
@@ -237,22 +227,9 @@ export const make = Effect.fn("RelayClientLedger.make")(function* (input: {
   return { track, reapOrphans };
 });
 
-// Reaping finishes before any connector starts, so exactly one serves the tunnel.
-export const layer = (input: { readonly stateDir: string }) =>
-  Layer.effect(
-    RelayClientLedger,
-    Effect.gen(function* () {
-      const ledger = yield* make(input);
-      yield* ledger.reapOrphans;
-      return RelayClientLedger.of({ track: ledger.track });
-    }),
-  );
-
-export const layerTest = Layer.succeed(
-  RelayClientLedger,
-  RelayClientLedger.of({
-    track: Effect.fn("RelayClientLedger.track")(function () {
-      return Effect.succeed(Effect.void);
-    }),
-  }),
-);
+/**
+ * T3 Connect is removed from this build, but a server from an older build may have crashed and
+ * left its relay client (cloudflared) running; stop any such orphan at startup.
+ */
+export const reapOrphanRelayClients = (stateDir: string) =>
+  make({ stateDir }).pipe(Effect.flatMap((ledger) => ledger.reapOrphans));

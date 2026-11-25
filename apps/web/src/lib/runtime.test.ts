@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+import { ManagedRelay } from "@t3tools/client-runtime/relay";
 import * as Effect from "effect/Effect";
-import * as Tracer from "effect/Tracer";
 // Load the runtime's module graph once at collection, outside the per-test timeout;
 // each case re-evaluates it from that cache after vi.resetModules().
 import "./runtime";
@@ -11,48 +10,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("web runtime relay telemetry policy", () => {
-  it.each([
-    { surface: "desktop opt-out", desktopBridge: { getRelayTelemetryEnabled: () => false } },
-    { surface: "desktop enabled", desktopBridge: { getRelayTelemetryEnabled: () => true } },
-    { surface: "ordinary browser", desktopBridge: undefined },
-  ])("never exports relay spans from $surface", async ({ desktopBridge }) => {
+describe("web runtime without T3 Connect", () => {
+  it("never calls the relay, even when a relay URL is configured", async () => {
     vi.resetModules();
-    vi.stubEnv("T3CODE_TELEMETRY_ENABLED", "true");
-    vi.stubEnv("VITE_RELAY_OTLP_TRACES_URL", "https://telemetry.example.test/v1/traces");
-    vi.stubEnv("VITE_RELAY_OTLP_TRACES_DATASET", "relay-test");
-    vi.stubEnv("VITE_RELAY_OTLP_TRACES_TOKEN", "test-token");
-    vi.stubGlobal("window", { desktopBridge });
-    const fetchFn = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
+    vi.stubEnv("VITE_T3CODE_RELAY_URL", "https://relay.example.test");
+    const fetchFn = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchFn);
-    // Re-import after setting runtime policy: static initialization creates the exporter layer.
     const { runtime: freshRuntime } = await import("./runtime");
-    const { setDelegate } = await import("../observability/clientTracer");
-    const userSpans: Array<string> = [];
 
     try {
-      expect(
-        await freshRuntime.runPromise(
-          Effect.succeed("relay operation completed").pipe(
-            Effect.withSpan("relay.first-operation"),
-            withRelayClientTracing,
-          ),
+      const result = await freshRuntime.runPromise(
+        ManagedRelay.ManagedRelayClient.pipe(
+          Effect.flatMap((relay) => relay.listEnvironments({ clerkToken: "token" })),
+          Effect.result,
         ),
-      ).toBe("relay operation completed");
-
-      setDelegate(
-        Tracer.make({
-          span(options) {
-            userSpans.push(options.name);
-            return new Tracer.NativeSpan(options);
-          },
-        }),
       );
-      await freshRuntime.runPromise(Effect.void.pipe(Effect.withSpan("user.work")));
-      expect(userSpans).toEqual(["user.work"]);
+      expect(result._tag).toBe("Failure");
     } finally {
-      setDelegate(null);
-      // Closing the runtime flushes the exporter without waiting for its batch timer.
       await freshRuntime.dispose();
     }
 

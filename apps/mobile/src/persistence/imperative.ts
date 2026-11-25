@@ -29,18 +29,6 @@ export const updatePreferences = (
   transform: (current: MobilePreferences.Preferences) => Partial<MobilePreferences.Preferences>,
 ) => runPreferences((store) => store.update(transform));
 
-export const loadOrCreateAgentAwarenessDeviceId = () =>
-  runStorage((storage) => storage.loadOrCreateAgentAwarenessDeviceId);
-export const loadAgentAwarenessDeviceId = () =>
-  runStorage((storage) => storage.loadAgentAwarenessDeviceId);
-export const loadAgentAwarenessRegistrationRecord = () =>
-  runStorage((storage) => storage.loadAgentAwarenessRegistrationRecord);
-export const saveAgentAwarenessRegistrationRecord = (
-  record: MobileStorage.AgentAwarenessRegistrationRecord,
-) => runStorage((storage) => storage.saveAgentAwarenessRegistrationRecord(record));
-export const clearAgentAwarenessRegistrationRecord = () =>
-  runStorage((storage) => storage.clearAgentAwarenessRegistrationRecord);
-
 export const loadRecentThreadShortcuts = () =>
   runStorage((storage) => storage.loadRecentThreadShortcuts);
 export const saveRecentThreadShortcuts = (

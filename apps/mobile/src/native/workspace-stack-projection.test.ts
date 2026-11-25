@@ -103,9 +103,9 @@ describe("workspace presentation envelope", () => {
 describe("workspace router projection", () => {
   it("keeps workspace flows beside Home and restores them after a modal closes", () => {
     const draft = { key: "draft", name: "Thread", params: { draft: {} } };
-    const modal = { key: "connect", name: "ConnectOnboarding" };
+    const modal = { key: "connections-new", name: "ConnectionsNew" };
     const routes = [home, thread, draft, legal];
-    const isOverlay = (route: { name: string }) => route.name === "ConnectOnboarding";
+    const isOverlay = (route: { name: string }) => route.name === "ConnectionsNew";
     expect(projectWorkspaceStack(history([...routes, modal]), isOverlay)).toEqual({
       primary: home,
       detail: [thread, draft, legal],

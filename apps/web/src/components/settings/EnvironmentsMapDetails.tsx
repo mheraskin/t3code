@@ -1,13 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import type { PeerLinkHealth } from "@t3tools/client-runtime/state/peerLinks";
-import {
-  AuthMcpClientAccess,
-  type EnvironmentId,
-  resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+import { AuthMcpClientAccess, resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { T, useGT, useMessages } from "gt-react";
+import { useGT, useMessages } from "gt-react";
 import { ArrowRightIcon, ClockAlertIcon, PlusIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { LegendList } from "@legendapp/list/react";
 import { type ReactNode, useRef, useState } from "react";
@@ -116,7 +112,6 @@ export interface FleetDetailsProps {
   readonly stacks: ReadonlyArray<FleetStack>;
   readonly environments: ReadonlyArray<EnvironmentPresentation>;
   /** Why the account's T3 Connect machines are missing from the map, and how to ask again. */
-  readonly connectProblem: { readonly message: string; readonly retry: () => void } | null;
   readonly selection: FleetFocus | null;
   /** The machine a map search landed on inside the selected stack. */
   readonly found: string | null;
@@ -128,7 +123,6 @@ export interface FleetDetailsProps {
   readonly onToggleStack: (stackId: string) => void;
   /** The list's own row for a saved environment, or null where the list has none. */
   readonly renderSavedEnvironment: (environment: EnvironmentPresentation) => ReactNode;
-  readonly renderConnectMachine: (environmentId: EnvironmentId) => ReactNode;
   readonly onAddEnvironment: (host?: string) => void;
 }
 
@@ -136,7 +130,7 @@ const SECTION = "px-3 py-3 sm:px-4";
 
 /** What is selected on the map, with the controls the list keeps on each row. */
 export function FleetDetails(props: FleetDetailsProps) {
-  const { graph, stacks, selection, onSelect, connectProblem } = props;
+  const { graph, stacks, selection, onSelect } = props;
   const gt = useGT();
   const panel = useRef<HTMLDivElement>(null);
   const links = graph.edges.filter(isLinkEdge);
@@ -161,19 +155,6 @@ export function FleetDetails(props: FleetDetailsProps) {
       aria-label={gt("Details")}
       className="min-h-20 border-t border-border/60 text-xs outline-none"
     >
-      {connectProblem ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/60 px-3 py-2 sm:px-4">
-          <p className="min-w-0 flex-1 text-muted-foreground">
-            <span className="font-medium text-destructive">
-              <T>Could not load T3 Connect environments</T>
-            </span>{" "}
-            {connectProblem.message}
-          </p>
-          <Button size="xs" variant="outline" onClick={connectProblem.retry}>
-            {gt("Try again")}
-          </Button>
-        </div>
-      ) : null}
       {pair ? (
         <div className={SECTION}>
           <p className="mb-3 text-muted-foreground">{gt("Two links, one each way.")}</p>
@@ -623,7 +604,6 @@ function NodeDetails({
   onSelect,
   onLinkFrom,
   renderSavedEnvironment,
-  renderConnectMachine,
   onAddEnvironment,
 }: Omit<FleetDetailsProps, "selection" | "found" | "stacks" | "onToggleStack" | "onSelect"> & {
   readonly node: FleetNode;
@@ -666,15 +646,12 @@ function NodeDetails({
   );
   if (node.kind === "connect") {
     return (
-      <>
-        {renderConnectMachine(node.environmentId)}
-        <div className={cn(SECTION, "space-y-3 border-t border-border/60")}>
-          <p className="max-w-2xl text-muted-foreground">
-            {gt("Add {label} to this app to connect to it.", { label: node.label })}
-          </p>
-          {incoming.length > 0 ? linkedFrom : null}
-        </div>
-      </>
+      <div className={cn(SECTION, "space-y-3")}>
+        <p className="max-w-2xl text-muted-foreground">
+          {gt("Add {label} to this app to connect to it.", { label: node.label })}
+        </p>
+        {incoming.length > 0 ? linkedFrom : null}
+      </div>
     );
   }
   if (node.kind === "target") {

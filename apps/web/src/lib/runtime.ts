@@ -4,35 +4,36 @@ import * as Layer from "effect/Layer";
 import * as Socket from "effect/socket/Socket";
 
 import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
-import * as RelayTracing from "@t3tools/shared/relayTracing";
 import * as PrimaryEnvironmentHttpClient from "../environments/primary/httpClient";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 
-import * as Dpop from "../cloud/dpop";
-import * as ManagedRelayLayer from "../cloud/managedRelayLayer";
-import { resolveCloudPublicConfig } from "../cloud/publicConfig";
+import { DpopProof, ManagedRelay } from "@t3tools/client-runtime/relay";
+import { RelayWebClientId } from "@t3tools/contracts/relay";
+
+import * as Dpop from "./dpop";
 import * as ClientTracer from "../observability/clientTracer";
 
-function configuredRelayUrl(): string {
-  return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
-}
+// Directly paired addresses still sign with this device's DPoP key.
+const layerDpopSigner = DpopProof.layerSigner({
+  keyStore: "indexed-db",
+  loadOrCreateKey: Dpop.loadOrCreateProofKey(),
+});
+
+// Privacy fork: T3 Connect is removed. The connection runtime still asks for a relay client,
+// so it gets the disabled one, which fails every call without touching the network.
+const layerDisabledRelay = ManagedRelay.layer({
+  relayUrl: "http://relay.invalid",
+  clientId: RelayWebClientId,
+}).pipe(Layer.provideMerge(layerDpopSigner));
 
 const layerHttpClient = layerRemoteHttpClient((input, init) => globalThis.fetch(input, init));
-// Privacy fork: relay spans would go to T3's Axiom account, so the web client never exports them.
-const layerRelayTracing = RelayTracing.layer(null, {
-  serviceName: "t3code-web",
-  runtime: "browser",
-  serviceInstanceId: ClientTracer.serviceInstanceId,
-  client: typeof window !== "undefined" && window.desktopBridge ? "desktop" : "web",
-}).pipe(Layer.provide(layerHttpClient));
 
 type RuntimeLayerSource =
   | typeof layerHttpClient
   | typeof Dpop.layer
   | typeof Socket.layerWebSocketConstructorGlobal
-  | typeof layerRelayTracing
   | typeof ClientTracer.layer
-  | ReturnType<typeof ManagedRelayLayer.layer>;
+  | typeof layerDisabledRelay;
 
 const primaryHttpRuntime = ManagedRuntime.make(
   PrimaryEnvironmentHttpClient.layer.pipe(Layer.provide(PrimaryEnvironmentHttpLayer.layer)),
@@ -60,10 +61,7 @@ const layerRuntime = Layer.mergeAll(
   Dpop.layer,
   Socket.layerWebSocketConstructorGlobal,
   ClientTracer.layer,
-  layerRelayTracing,
-  ManagedRelayLayer.layer(configuredRelayUrl()).pipe(
-    Layer.provide(Layer.mergeAll(layerHttpClient, Dpop.layer)),
-  ),
+  layerDisabledRelay.pipe(Layer.provide(Layer.mergeAll(layerHttpClient, Dpop.layer))),
 );
 
 export const runtime: ManagedRuntime.ManagedRuntime<

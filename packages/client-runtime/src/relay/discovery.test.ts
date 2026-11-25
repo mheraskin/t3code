@@ -12,7 +12,6 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { Atom, AtomRegistry } from "effect/reactivity";
 
 import * as ManagedRelay from "./managedRelay.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
@@ -21,7 +20,6 @@ import { ConnectionBlockedError, type NetworkStatus } from "../connection/model.
 import * as ConnectionWakeups from "../connection/wakeups.ts";
 import * as RelayEnvironmentDiscovery from "./discovery.ts";
 import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
-import { createRelayEnvironmentDiscoveryAtoms } from "../state/relayDiscovery.ts";
 
 const environments = [
   {
@@ -187,56 +185,6 @@ const makeHarness = Effect.fn("RelayDiscoveryTest.makeHarness")(function* () {
 });
 
 describe("RelayEnvironmentDiscovery", () => {
-  it.effect("fetches a fresh list after removal while an older refresh is checking statuses", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness();
-      yield* Effect.gen(function* () {
-        const discovery = yield* RelayEnvironmentDiscovery.RelayEnvironmentDiscovery;
-        const atoms = createRelayEnvironmentDiscoveryAtoms(
-          Atom.runtime(
-            Layer.succeed(RelayEnvironmentDiscovery.RelayEnvironmentDiscovery, discovery),
-          ),
-        );
-        const registry = AtomRegistry.make();
-        yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
-
-        const refresh = yield* Effect.forkChild(
-          Effect.exit(atoms.refresh.run(registry, undefined)),
-          { startImmediately: true },
-        );
-        yield* SubscriptionRef.changes(discovery.state).pipe(
-          Stream.filter((state) => state.environments.size === environments.length),
-          Stream.runHead,
-        );
-        const coalescedRefresh = yield* Effect.forkChild(
-          Effect.exit(atoms.refresh.run(registry, undefined)),
-          { startImmediately: true },
-        );
-        yield* Ref.set(harness.listedEnvironments, [environments[1]!]);
-        const mutationRefresh = yield* Effect.forkChild(
-          Effect.exit(atoms.refreshAfterMutation.run(registry, undefined)),
-          { startImmediately: true },
-        );
-
-        const requests = yield* Ref.get(harness.statusRequests);
-        for (const environment of environments) {
-          yield* Deferred.succeed(
-            requests.get(environment.environmentId)!,
-            status(environment, "online"),
-          );
-        }
-        const results = yield* Fiber.joinAll([refresh, coalescedRefresh, mutationRefresh]);
-        for (const result of results) {
-          expect(result._tag).toBe("Success");
-        }
-        expect(yield* Ref.get(harness.listCalls)).toBe(2);
-        const complete = yield* SubscriptionRef.get(discovery.state);
-        expect([...complete.environments.keys()]).toEqual([environments[1]!.environmentId]);
-        expect(complete.refreshing).toBe(false);
-      }).pipe(Effect.provide(harness.layer));
-    }),
-  );
-
   it.effect("publishes each environment status as soon as that lookup completes", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();

@@ -1,19 +1,11 @@
-import { useAuth } from "@clerk/react";
-import type { EnvironmentId } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import { T } from "gt-react";
-import { CheckIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 
 import { APP_DISPLAY_NAME, DESKTOP_DOWNLOAD_URL } from "~/branding";
-import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "../env";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
-import { useRelayEnvironmentDiscovery } from "../state/environments";
 import { InstallT3Commands } from "./InstallT3Commands";
-import { retryClerkLoad, useClerkLoadFailed } from "./clerk/clerkLoadFailure";
-import { useT3ConnectAuthPrompt } from "./clerk/useT3ConnectAuthPrompt";
-import { CloudEnvironmentConnectRows } from "./cloud/CloudEnvironmentConnectList";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
@@ -21,7 +13,6 @@ import { WorkspacePageHeader } from "./WorkspacePageHeader";
 
 /** Home screen for the hosted app before any computer is added. */
 export function HostedEmptyState() {
-  const cloudEnabled = hasCloudPublicConfig();
   const localEnvironmentOff = isLocalEnvironmentDisabled();
 
   return (
@@ -43,8 +34,6 @@ export function HostedEmptyState() {
             <EmptyDescription>
               {localEnvironmentOff ? (
                 <T>Turn it back on, or connect a different computer.</T>
-              ) : cloudEnabled ? (
-                <T>Your agents run on your computer.</T>
               ) : (
                 <T>Your agents run on your computer. Start T3 Code there first.</T>
               )}
@@ -57,74 +46,13 @@ export function HostedEmptyState() {
               </Button>
             ) : (
               <ol className="w-full space-y-4 text-left">
-                {cloudEnabled ? <T3ConnectSteps /> : <PairingSteps />}
+                <PairingSteps />
               </ol>
             )}
           </EmptyContent>
         </Empty>
       </div>
     </SidebarInset>
-  );
-}
-
-function T3ConnectSteps() {
-  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const loadFailed = useClerkLoadFailed();
-  const { openAuthPrompt } = useT3ConnectAuthPrompt();
-  // Adding the first computer unmounts this screen. Wait for all health checks
-  // so every compatible registration is queued before that happens.
-  const [autoAddedComputers] = useState(() => new Set<EnvironmentId>());
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<EnvironmentId>>(() => new Set());
-  const discovered = [...useRelayEnvironmentDiscovery().environments.values()];
-  const discoverySettled =
-    discovered.length > 0 && discovered.every(({ availability }) => availability !== "checking");
-  return (
-    <>
-      <SetupStep number={1}>
-        {loadFailed ? (
-          <Button size="sm" onClick={retryClerkLoad}>
-            <T>Retry sign-in</T>
-          </Button>
-        ) : isSignedIn ? (
-          <p className="flex items-center gap-1.5 text-muted-foreground">
-            <CheckIcon className="size-4" />
-            <T>Signed in</T>
-          </p>
-        ) : (
-          <Button size="sm" disabled={!isLoaded} onClick={openAuthPrompt}>
-            <T>Sign in</T>
-          </Button>
-        )}
-      </SetupStep>
-      <SetupStep number={2}>
-        <RunOnComputer command="t3 connect" />
-        {isSignedIn ? (
-          <div className="mt-4 space-y-1.5">
-            <CloudEnvironmentConnectRows
-              primaryEnvironmentId={null}
-              savedEnvironments={[]}
-              refreshWhileEmpty
-              selection={{
-                ...(discoverySettled ? { autoSelectedComputers: autoAddedComputers } : {}),
-                selectedIds,
-                onChange: (environmentId, selected) =>
-                  setSelectedIds((current) => {
-                    const next = new Set(current);
-                    if (selected) next.add(environmentId);
-                    else next.delete(environmentId);
-                    return next;
-                  }),
-              }}
-              empty={
-                <p className="text-xs text-muted-foreground">
-                  <T>Waiting for your computer…</T>
-                </p>
-              }
-            />
-          </div>
-        ) : null}
-      </SetupStep>
-    </>
   );
 }
 

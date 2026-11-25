@@ -2,7 +2,6 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   BearerConnectionTarget,
-  RelayConnectionTarget,
   SshConnectionProfile,
   SshConnectionTarget,
 } from "@t3tools/client-runtime/connection";
@@ -304,15 +303,8 @@ const migrateSavedEnvironmentRecords = Effect.fn(
   const credentials: Array<RuntimeConnectionCatalogDocumentType["credentials"][number]> = [];
 
   for (const record of records) {
-    if (record.relayManaged !== undefined) {
-      targets.push(
-        new RelayConnectionTarget({
-          environmentId: record.environmentId,
-          label: record.label,
-        }),
-      );
-      continue;
-    }
+    // Privacy fork: T3 Connect is removed, so legacy relay records are dropped, not migrated.
+    if (record.relayManaged !== undefined) continue;
 
     if (record.desktopSsh !== undefined) {
       const id = connectionId("ssh", record.environmentId);

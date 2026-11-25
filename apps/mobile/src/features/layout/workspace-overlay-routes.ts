@@ -5,7 +5,6 @@
 const LISTED_OVERLAY_ROUTES: ReadonlySet<string> = new Set([
   "PullRequestReview",
   "PullRequestInlineComment",
-  "ConnectOnboarding",
   "Connections",
   "ConnectionsNew",
   "GitBranches",
@@ -26,8 +25,6 @@ const LISTED_OVERLAY_ROUTES: ReadonlySet<string> = new Set([
   "NewTaskBranch",
   "NewTaskRepositories",
   "SettingsLegal",
-  "SettingsAuth",
-  "SettingsWaitlist",
   "ThreadAgents",
   "ThreadBackgroundWork",
   "ThreadGuestShare",
