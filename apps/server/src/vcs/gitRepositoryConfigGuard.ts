@@ -101,7 +101,7 @@ export interface RepositoryConfigPolicy {
 }
 
 /** Without a listing; Git fails the command on the same config problem the listing hit. */
-export const STATIC_POLICY: RepositoryConfigPolicy = {
+const STATIC_POLICY: RepositoryConfigPolicy = {
   overrides: ALWAYS,
   transportConfigured: false,
 };
@@ -126,7 +126,7 @@ export const gitSubcommandIndex = (args: ReadonlyArray<string>) => {
 };
 
 /** The same repository selection as `args`, listing config with each value's scope. */
-export const configListingArgs = (args: ReadonlyArray<string>) => {
+const configListingArgs = (args: ReadonlyArray<string>) => {
   const subcommand = gitSubcommandIndex(args);
   const globals: string[] = [];
   const end = subcommand === -1 ? args.length : subcommand;

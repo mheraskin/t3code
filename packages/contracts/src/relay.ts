@@ -650,7 +650,7 @@ const RelayAgentActivityPublishErrors = [
   RelayInternalError,
 ] as const;
 
-export class RelayClientPrincipal extends Context.Service<
+class RelayClientPrincipal extends Context.Service<
   RelayClientPrincipal,
   {
     readonly userId: string;
@@ -660,7 +660,7 @@ export class RelayClientPrincipal extends Context.Service<
   }
 >()("@t3tools/contracts/relay/RelayClientPrincipal") {}
 
-export class RelayEnvironmentPrincipal extends Context.Service<
+class RelayEnvironmentPrincipal extends Context.Service<
   RelayEnvironmentPrincipal,
   {
     readonly environmentId: string;
@@ -675,7 +675,7 @@ const RelayClientBearerAuthorization = HttpApiSecurity.http({ scheme: "bearer" }
   ),
 );
 
-export class RelayClientAuth extends HttpApiMiddleware.Service<
+class RelayClientAuth extends HttpApiMiddleware.Service<
   RelayClientAuth,
   { provides: RelayClientPrincipal }
 >()("RelayClientAuth", {
@@ -690,7 +690,7 @@ const RelayEnvironmentBearerAuthorization = HttpApiSecurity.http({ scheme: "bear
   ),
 );
 
-export class RelayEnvironmentAuth extends HttpApiMiddleware.Service<
+class RelayEnvironmentAuth extends HttpApiMiddleware.Service<
   RelayEnvironmentAuth,
   { provides: RelayEnvironmentPrincipal }
 >()("RelayEnvironmentAuth", {
@@ -705,7 +705,7 @@ const RelayDpopAuthorization = HttpApiSecurity.http({ scheme: "DPoP" }).pipe(
   ),
 );
 
-export class RelayDpopClientAuth extends HttpApiMiddleware.Service<
+class RelayDpopClientAuth extends HttpApiMiddleware.Service<
   RelayDpopClientAuth,
   { provides: RelayClientPrincipal }
 >()("RelayDpopClientAuth", {
@@ -747,7 +747,7 @@ export type RelayEnvironmentConnectRequest = typeof RelayEnvironmentConnectReque
 
 export const RelayEnvironmentConnectScope = "environment:connect" as const;
 export const RelayEnvironmentStatusScope = "environment:status" as const;
-export const RelayMobileRegistrationScope = "mobile:registration" as const;
+const RelayMobileRegistrationScope = "mobile:registration" as const;
 export const RelayDpopAccessTokenScope = Schema.Literals([
   RelayEnvironmentConnectScope,
   RelayEnvironmentStatusScope,
@@ -757,7 +757,7 @@ export type RelayDpopAccessTokenScope = typeof RelayDpopAccessTokenScope.Type;
 
 const RelayDpopTokenExchangeGrantType = "urn:ietf:params:oauth:grant-type:token-exchange" as const;
 const RelayJwtSubjectTokenType = "urn:ietf:params:oauth:token-type:jwt" as const;
-export const RelayAccessTokenType = "urn:ietf:params:oauth:token-type:access_token" as const;
+const RelayAccessTokenType = "urn:ietf:params:oauth:token-type:access_token" as const;
 export const RelayPublicClientId = Schema.Literals(["t3-mobile", "t3-web"]);
 export type RelayPublicClientId = typeof RelayPublicClientId.Type;
 export const RelayMobileClientId = "t3-mobile" as const;
@@ -965,8 +965,6 @@ export type RelayOkResponse = typeof RelayOkResponse.Type;
 
 export const RelayT3ChatPlan = Schema.Literals(["free", "pro", "premier"]);
 export type RelayT3ChatPlan = typeof RelayT3ChatPlan.Type;
-
-export const DEFAULT_MANAGED_TUNNEL_LIMIT = 3;
 
 // A linked paid T3 Chat plan raises the default managed tunnel cap.
 export const T3CHAT_PLAN_TUNNEL_LIMITS = { pro: 10, premier: 100 } as const;
@@ -1322,7 +1320,7 @@ const RelayAccountWebhooksGroup = HttpApiGroup.make("accountWebhooks")
   .add(HttpApiEndpoint.post("clerk", "/v1/webhooks/clerk"))
   .annotate(OpenApi.Description, "Receive Clerk account lifecycle events.");
 
-export const RelayApi = HttpApi.make("RelayApi")
+const RelayApi = HttpApi.make("RelayApi")
   .add(
     RelayHealthGroup,
     RelayMetadataGroup,
