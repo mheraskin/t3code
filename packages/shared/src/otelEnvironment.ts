@@ -343,10 +343,6 @@ export const isCiEnvironment = (env: Readonly<Record<string, string | undefined>
     return value !== undefined && value !== "" && value !== "false" && value !== "0";
   });
 
-/** The cross-tool `DO_NOT_TRACK=1` convention turns off product analytics and relay tracing. */
-export const isDoNotTrackSet = (env: Readonly<Record<string, string | undefined>>) =>
-  T3CODE_TRUE.includes(env.DO_NOT_TRACK?.trim().toLowerCase() ?? "");
-
 // Privacy fork: relay diagnostics tracing goes to a third party (Axiom), so it is
 // off for every environment and cannot be turned back on.
 export const isRelayTracingEnabled = (_env: Readonly<Record<string, string | undefined>>) => false;
